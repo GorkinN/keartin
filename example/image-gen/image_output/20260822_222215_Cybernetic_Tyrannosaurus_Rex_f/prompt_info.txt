@@ -1,0 +1,6 @@
+Prompt: Cybernetic Tyrannosaurus Rex firing a bazooka, photorealistic, highly detailed
+Size: 2048x2048
+Steps: 50
+Files: 2
+Model: FLUX.1-dev
+Date: 2026-08-22 22:22:15.227224

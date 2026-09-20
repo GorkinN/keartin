@@ -1,0 +1,6 @@
+Prompt: Pixel art seamless pattern of glowing embers and hot coals, dark background, tileable, retro 16-bit style
+Size: 1024x1024
+Steps: 50
+Files: 20
+Model: FLUX.1-dev
+Date: 2026-08-23 10:03:58.233788

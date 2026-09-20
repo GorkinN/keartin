@@ -1,0 +1,22 @@
+# llm-keartin — project rules
+
+## Stack
+
+- Browser talks **only** to NestJS (`:3000`). Direct UI → FastAPI is forbidden.
+- Python FastAPI (`:8000`) is the only GPU owner. NestJS does not call Ollama, Qdrant, or Flux itself except via FastAPI.
+- Ollama and Flux run on the Windows host, not in Docker. Docker is Qdrant + MinIO only.
+- Hugging Face cache comes from `.env` (`HF_HOME`, `HUGGINGFACE_HUB_CACHE`, `TRANSFORMERS_CACHE`). Never hardcode `D:/huggingface_cache`. Set these env vars **before** importing `transformers`, `diffusers`, `sentence-transformers`, or `huggingface_hub`.
+- Python deps: `ai-service/pyproject.toml` only. Do not add `requirements.txt`.
+- JS: pnpm workspaces (`frontend`, `backend`). No Turborepo/Nx.
+
+## GPU
+
+- One `GpuManager` in FastAPI. One lock. Tenants: `llm` | `flux` (and `embed` only if embeddings ever move to GPU/Ollama).
+- Any Ollama call that bypasses GpuManager is a bug. Do not `taskkill` Ollama.
+- Do not load Flux and the LLM into VRAM at the same time.
+- Do not put Flux in Docker. Do not add ComfyUI.
+
+## Scope
+
+- Implement the current plan stage only. Do not start the next stage “while we are here”.
+- Stage 0: health + stubs. No generate, no parsers, no Book/Post models, no real UI.

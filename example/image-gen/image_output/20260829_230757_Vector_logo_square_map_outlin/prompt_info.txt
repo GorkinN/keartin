@@ -1,0 +1,6 @@
+Prompt: Vector logo, square map outline. Inside: network graph, small circles connected by lines forming wifi shape. Arcs are circuit-like segments. Central node cyan, others dark blue. White background, minimalist schematic, line art, no text.
+Size: 512x512
+Steps: 50
+Files: 20
+Model: FLUX.1-dev
+Date: 2026-08-29 23:07:57.727993

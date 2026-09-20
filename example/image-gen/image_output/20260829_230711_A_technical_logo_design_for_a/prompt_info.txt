@@ -1,0 +1,6 @@
+Prompt: A technical logo design for a network infrastructure app. The main shape is a square, outlined by a thin line, resembling a map fragment. Inside the square, there is a network topology graph: nodes (small circles) connected by lines. The lines form the shape of a wifi icon, but the arcs are made of segmented, circuit-like traces. One central node is larger and colored cyan, other nodes are dark blue. The background is white. Style: minimalist, blueprints, schematic, line art, vector, no gradients, very clean
+Size: 512x512
+Steps: 50
+Files: 20
+Model: FLUX.1-dev
+Date: 2026-08-29 23:07:11.474241

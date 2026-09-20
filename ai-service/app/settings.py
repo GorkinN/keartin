@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=None,
+        extra="ignore",
+    )
+
+    hf_home: str = ""
+    huggingface_hub_cache: str = ""
+    transformers_cache: str = ""
+    ollama_host: str = "http://127.0.0.1:11434"
+    llm_model: str = "qwen3.5:9b-16k"
+    llm_num_ctx: int = 8192
+    llm_keep_alive: str = "5m"
+    qdrant_url: str = "http://127.0.0.1:6333"
+
+    @field_validator("ollama_host")
+    @classmethod
+    def normalize_ollama_host(cls, value: str) -> str:
+        """Ollama uses OLLAMA_HOST as a bind address (e.g. 0.0.0.0). Clients need a URL."""
+        host = value.strip()
+        if not host:
+            return "http://127.0.0.1:11434"
+        if "://" in host:
+            return host.rstrip("/")
+        if host in {"0.0.0.0", "::", "[::]"}:
+            return "http://127.0.0.1:11434"
+        if host.startswith("0.0.0.0:"):
+            return f"http://127.0.0.1:{host.split(':', 1)[1]}"
+        if ":" not in host.strip("[]"):
+            host = f"{host}:11434"
+        return f"http://{host}"
+
+
+def get_settings() -> Settings:
+    return Settings()

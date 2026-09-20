@@ -1,0 +1,6 @@
+Prompt: Landscape black and white background image, wavy female hair flowing horizontally from edge to edge, filling entire frame, elegant silky waves, gray tones, soft lighting, high contrast, minimalist
+Size: 1024x1024
+Steps: 25
+Files: 20
+Model: FLUX.1-dev
+Date: 2026-08-16 22:36:49.010098

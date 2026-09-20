@@ -1,0 +1,12 @@
+---
+description: Core stack, GPU lock, and Hugging Face cache rules
+alwaysApply: true
+---
+
+# llm-keartin
+
+- Browser talks only to NestJS. Never call FastAPI, Ollama, or Qdrant from the UI.
+- FastAPI owns the GPU. All Ollama access goes through GpuManager. Bypassing the lock is a bug. Do not `taskkill` Ollama.
+- Set `HF_HOME` / `HUGGINGFACE_HUB_CACHE` / `TRANSFORMERS_CACHE` from `.env` before importing Hugging Face libraries. Do not hardcode cache paths.
+- Do not put Flux in Docker. Do not add ComfyUI. Python deps live in `ai-service/pyproject.toml` only.
+- Implement the current plan stage only.

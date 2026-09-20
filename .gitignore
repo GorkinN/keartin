@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build
+dist/
+build/
+*.egg-info/
+frontend/dist/
+backend/dist/
+
+# Env and secrets
+.env
+.env.local
+*.pem
+
+# App data
+data/
+
+# Hugging Face / GPU example venv (do not commit)
+example/flux_cuda/
+
+# Prisma
+backend/src/generated/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/
+*.swp
+
+# Python
+.Python
+pip-log.txt
+.coverage
+htmlcov/
+
+# Nest
+backend/tsconfig.build.tsbuildinfo

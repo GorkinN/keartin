@@ -1,0 +1,6 @@
+Prompt: marble floor texture
+Size: 512x512
+Steps: 25
+Files: 10
+Model: FLUX.1-dev
+Date: 2026-08-23 23:00:25.936324

@@ -1,0 +1,6 @@
+Prompt: Highly detailed 8-bit pixel art skeleton warrior, idle battle stance. Mechanical crab-like claw replacing one arm, cracked bones, glowing eyes. No background, transparent. Grim, gritty, crisp pixels, strong shading, retro game sprite.
+Size: 768x768
+Steps: 25
+Files: 5
+Model: FLUX.1-dev
+Date: 2026-08-17 21:59:06.816291

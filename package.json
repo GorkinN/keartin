@@ -1,0 +1,10 @@
+{
+  "name": "llm-keartin",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "scripts": {
+    "dev:frontend": "pnpm --filter frontend dev",
+    "dev:backend": "pnpm --filter backend start:dev",
+    "dev:ai": "pnpm --dir ai-service start"
+  }
+}

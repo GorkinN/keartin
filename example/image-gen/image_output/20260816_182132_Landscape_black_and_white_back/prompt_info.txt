@@ -1,0 +1,6 @@
+Prompt: Landscape black and white background image, only beautiful flowing female hair, elegant silky waves filling entire frame, gray tones, soft lighting, high contrast, minimalist, professional hair salon backdrop, no face, no body, no text
+Size: 1024x1024
+Steps: 25
+Files: 5
+Model: FLUX.1-dev
+Date: 2026-08-16 18:21:32.162131
