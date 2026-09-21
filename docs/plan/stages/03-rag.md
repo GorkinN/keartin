@@ -1,10 +1,54 @@
 # Этап 3. RAG
 
-**Статус:** не начат  
+**Статус:** выполнен, принят (2026-09-21)  
 **Зависимости:** [этап 0](00-scaffold.md) выполнен (Qdrant в compose). GPU не обязателен.  
 **Следующий этап:** [04-pipeline.md](04-pipeline.md)
 
-## Цель
+## Отчёт
+
+### Сделано
+
+- Парсеры PDF / EPUB / FB2 / DOCX / TXT, чанкер ~2400 символов + overlap 400.
+- `BAAI/bge-m3` на CPU из `HF_HOME`, `local_files_only=True`. Скрипт [`scripts/download-bge-m3.ps1`](../../../scripts/download-bge-m3.ps1) (Windows trust store).
+- Qdrant `library_chunks`, Cosine 1024, payload с `text`. Переиндексация delete+upsert по `book_id`.
+- FastAPI: `POST /rag/index` → 202 + job; poll статуса; `POST /rag/search`; `DELETE /rag/books/{book_id}`.
+- Тесты фикстур: `ai-service/tests/rag/` (11 passed). [docs/RAG.md](../../RAG.md).
+
+### Как проверить
+
+Qdrant в compose. Модель уже в `D:/huggingface_cache`. FastAPI на `:8000`.
+
+```powershell
+.\ai-service\.venv\Scripts\python -c "import time, httpx; from pathlib import Path; c=httpx.Client(timeout=None, trust_env=False); p=str(Path('ai-service/tests/rag/fixtures/sample.txt').resolve()); r=c.post('http://127.0.0.1:8000/rag/index', json={'path':p,'book_id':'book-txt'}); print(r.status_code, r.json()); j=r.json()['job_id'];
+while True:
+    st=c.get(f'http://127.0.0.1:8000/rag/index/{j}').json(); print(st['status'], st['chunks_done'], st['chunks_total']);
+    if st['status'] in ('ready','error'): break
+    time.sleep(1)
+print(c.post('http://127.0.0.1:8000/rag/search', json={'query':'читать спрос, цену и издержки','book_ids':['book-txt']}).json())"
+```
+
+| Проверка | Факт 2026-09-21 |
+|----------|-----------------|
+| `bge-m3` в `HF_HOME` | `hub/models--BAAI--bge-m3/snapshots/5617a9f6...`; профиль `%USERPROFILE%\.cache\huggingface` не создан |
+| TXT + PDF фикстуры → `ready` | search цитатой → `book_id=book-txt`, `lang=ru` |
+| фильтр `book_ids: ["no-such-book"]` | `hits: []` |
+| EPUB / FB2 фикстуры | текст не пустой, index `ready` |
+| повторный index `book-txt` | один чанк, без дублей `chunk_index` |
+| книга FineReader 214 стр. (скан без текста) | джоба `error`: empty text, сервис жив |
+| текстовый PDF 120 стр. | HTTP 202 сразу; прогресс 8…120; `ready` за ~114 с; search → `book-long` |
+
+Приёмка пользователем (2026-09-21): index `sample.txt` → `queued` / `indexing 0 1` / `ready 1 1`; search «читать спрос, цену и издержки» → хит `book-txt`, `lang=ru`, `score≈0.597`.
+
+### Не вошло / отложено
+
+- OCR сканов. Пайплайн поста — этап 4. Nest library CRUD / StorageProvider / UI.
+- SSE индексации, multipart upload.
+
+Архитектуру не ломали. Факты — в [docs/DECISIONS.md](../../DECISIONS.md) и [docs/RAG.md](../../RAG.md).
+
+---
+
+## Микро-план (зафиксирован до кода)
 
 Книга → чанки → Qdrant → релевантный поиск с фильтром по выбранным источникам. Переиндексация и статусы.
 

@@ -1,6 +1,6 @@
 # Обзор проекта
 
-**Состояние репозитория (2026-09-21):** этап 2 выполнен и принят — Flux NF4 через FastAPI + GpuManager. RAG ещё нет. Следующий этап — [03-rag.md](stages/03-rag.md).
+**Состояние репозитория (2026-09-21):** этап 3 выполнен и принят — RAG через FastAPI + Qdrant + `bge-m3` CPU. Следующий этап — [04-pipeline.md](stages/04-pipeline.md).
 
 ## Цель
 
@@ -39,7 +39,7 @@
 | `nomic-embed-text` | 274 MB | **не подходит для русского**, не использовать |
 | `hf.co/bartowski/Llama-3.2-3B-Instruct-GGUF:Q4_K_M` | — | не основная |
 
-Требуется докачать эмбеддинг-модель **bge-m3** (мультиязычная, RU+EN) **в тот же кэш** `D:/huggingface_cache`, не в `%USERPROFILE%\.cache\huggingface`. Рекомендуемый путь — CPU через `sentence-transformers` / FlagEmbedding, не через Ollama. Подробности: [03-decisions.md](03-decisions.md).
+Эмбеддинг-модель **bge-m3** лежит в том же кэше `D:/huggingface_cache` (скачана скриптом `scripts/download-bge-m3.ps1`). CPU через `sentence-transformers`, не через Ollama.
 
 ## Стек
 

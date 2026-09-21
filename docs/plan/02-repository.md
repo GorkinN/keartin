@@ -53,7 +53,7 @@ llm-keartin/
   data/                      # gitignore
 ```
 
-Ещё нет (появятся на своих этапах): `frontend/src/api`, `frontend/src/hooks`, Nest-модули library/posts/presets/generate/storage, Python `image/` `rag/` `pipeline/` `tests/`, `scripts/check-gpu.ps1`, `docs/GPU.md`, `docs/RAG.md`.
+Ещё нет (появятся на своих этапах): `frontend/src/api`, `frontend/src/hooks`, Nest-модули library/posts/presets/generate/storage, Python `pipeline/`.
 
 ## Целевое дерево (к этапу 7)
 

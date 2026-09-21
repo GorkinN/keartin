@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     llm_num_ctx: int = 8192
     llm_keep_alive: str = "5m"
     qdrant_url: str = "http://127.0.0.1:6333"
+    qdrant_collection: str = "library_chunks"
+    embed_model: str = "BAAI/bge-m3"
+    rag_chunk_chars: int = 2400
+    rag_chunk_overlap: int = 400
+    rag_top_k: int = 10
+    rag_embed_batch: int = 8
     gpu_free_mb_threshold: int = 500
     flux_model_id: str = "black-forest-labs/FLUX.1-dev"
     flux_quant: str = "nf4"

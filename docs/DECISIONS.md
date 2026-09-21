@@ -1,11 +1,11 @@
 # Принятые решения
 
-Дата фиксации: 2026-09-20 (этапы 0–2). Приёмка этапа 2: 2026-09-21. Источник дефолтов: [plan/03-decisions.md](plan/03-decisions.md).
+Дата фиксации: 2026-09-20 (этапы 0–2). Приёмка этапа 2: 2026-09-21. Приёмка этапа 3: 2026-09-21. Источник дефолтов: [plan/03-decisions.md](plan/03-decisions.md).
 
 | # | Решение | Статус |
 |---|---------|--------|
 | 1 | LLM: `qwen3.5:9b-16k`, `num_ctx=8192`. Fallback `LLM_MODEL` в `.env`, не вторая живая модель | принято |
-| 2 | Embeddings: `BAAI/bge-m3` на CPU через sentence-transformers / FlagEmbedding | принято |
+| 2 | Embeddings: `BAAI/bge-m3` на CPU через sentence-transformers (FlagEmbedding не ставили) | принято |
 | 3 | Парсеры: PyMuPDF, ebooklib, lxml (FB2), python-docx, charset-normalizer. Не LangChain, не Unstructured | принято |
 | 4 | Flux: NF4 + CPU offload, fallback GGUF. Не Docker, не ComfyUI. Repo id из HF-кэша; `FLUX_MODEL_PATH` опционален | принято |
 | 5 | Выгрузка Ollama: `keep_alive: 0` по `ollama ps`, затем `ollama stop`, poll `nvidia-smi`. Не `taskkill` | принято |
@@ -43,3 +43,14 @@
 - GGUF-ветка есть (`FLUX_QUANT=gguf` + `FLUX_MODEL_PATH`). NF4 на этой машине прошёл, GGUF-файл не качали.
 - Картинка этапа 2: `data/tmp/flux-*.png` + `image_base64`. StorageProvider / Nest / UI — позже.
 - Приёмка 2026-09-21: после текста 7574 МБ / `qwen3.5:9b-16k`; 512²/20 → 200; после Flux 1187 МБ, `ollama_models: []`.
+
+## Решения этапа 3
+
+- Эмбеды: `sentence-transformers` + `device="cpu"` + `local_files_only=True`. FlagEmbedding не добавляли.
+- В Qdrant payload кроме `book_id` / `chunk_index` / `source_name` / `lang` лежит `text` (иначе search нечего вернуть).
+- Джобы индексации — в памяти FastAPI. Рестарт теряет статус; векторы в Qdrant остаются.
+- `POST /rag/index` принимает путь на диске, не multipart.
+- Скачивание `bge-m3`: `scripts/download-bge-m3.ps1` + Windows `truststore` (certifi ломается на корпоративном SSL). Кэш профиля не создаётся.
+- Скан PDF без текстового слоя (книга FineReader, 214 стр. картинок) → джоба `error`. OCR не делаем.
+- Прогресс 100+ стр. проверили на текстовом PDF 120 стр. (`data/tmp/rag-long-ru.pdf`): 202 сразу, 120 чанков ~114 с, search по русской фразе → `book-long`.
+- Приёмка 2026-09-21: `sample.txt` → `ready 1/1`; search «читать спрос, цену и издержки» → `book-txt`, `lang=ru`, `score≈0.597`.

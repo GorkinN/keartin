@@ -4,7 +4,7 @@
 
 FLUX.1-dev — лицензия non-commercial; для личного локального использования.
 
-**Сейчас:** этап 2 выполнен, принят (2026-09-21). RAG и рабочий UI ещё нет. План: [docs/plan/README.md](docs/plan/README.md).
+**Сейчас:** этап 3 выполнен, принят (2026-09-21). Рабочий UI ещё нет. План: [docs/plan/README.md](docs/plan/README.md).
 
 ## Требования
 
@@ -43,6 +43,7 @@ npx pnpm@9.15.9 --filter frontend dev
 | FastAPI health | http://127.0.0.1:8000/health |
 | FastAPI текст | `POST /generate/text` и `POST /generate/text/stream` (curl/httpx, не из UI) |
 | FastAPI картинка | `POST /generate/image` и `POST /generate/image/stream`; `GET /gpu/status` |
+| FastAPI RAG | `POST /rag/index`, `GET /rag/index/{job_id}`, `POST /rag/search`, `DELETE /rag/books/{book_id}` |
 | NestJS | http://127.0.0.1:3000/health |
 | Vite | http://127.0.0.1:5173 (заглушки экранов) |
 
@@ -60,7 +61,8 @@ npx pnpm@9.15.9 --filter frontend dev
 
 - `frontend/` — React + Vite + shadcn (заглушки)
 - `backend/` — NestJS + Prisma SQLite (пока только health)
-- `ai-service/` — FastAPI, GpuManager, Ollama text, Flux image
+- `ai-service/` — FastAPI, GpuManager, Ollama text, Flux image, RAG
 - `docker/` — Qdrant и MinIO (`quay.io/minio/minio`; Docker Hub `minio/minio` на этой машине недоступен)
 - `docs/plan/` — план разработки
 - `docs/GPU.md` — выгрузка Ollama, NF4, порог VRAM
+- `docs/RAG.md` — парсеры, bge-m3, Qdrant, API индексации

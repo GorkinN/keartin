@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FictionBook xmlns="http://www.gribuser.ru/xml/fictionbook/2.0">
+  <description>
+    <title-info>
+      <book-title>Тестовая книга</book-title>
+      <author>
+        <first-name>Иван</first-name>
+        <last-name>Тестов</last-name>
+      </author>
+    </title-info>
+  </description>
+  <body>
+    <title><p>Глава 1</p></title>
+    <p>Экономика в практике менеджера — это умение читать спрос, цену и издержки.</p>
+  </body>
+  <binary id="cover.jpg" content-type="image/jpeg">AAAA</binary>
+</FictionBook>
