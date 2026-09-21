@@ -4,7 +4,7 @@
 
 FLUX.1-dev — лицензия non-commercial; для личного локального использования.
 
-**Сейчас:** этапы 0–1 приняты (2026-09-20). FastAPI стримит текст из Ollama. Картинок, RAG и рабочего UI ещё нет. План: [docs/plan/README.md](docs/plan/README.md).
+**Сейчас:** этап 2 выполнен, принят (2026-09-21). RAG и рабочий UI ещё нет. План: [docs/plan/README.md](docs/plan/README.md).
 
 ## Требования
 
@@ -42,6 +42,7 @@ npx pnpm@9.15.9 --filter frontend dev
 | MinIO console | http://127.0.0.1:9001 (`minioadmin` / `minioadmin`) |
 | FastAPI health | http://127.0.0.1:8000/health |
 | FastAPI текст | `POST /generate/text` и `POST /generate/text/stream` (curl/httpx, не из UI) |
+| FastAPI картинка | `POST /generate/image` и `POST /generate/image/stream`; `GET /gpu/status` |
 | NestJS | http://127.0.0.1:3000/health |
 | Vite | http://127.0.0.1:5173 (заглушки экранов) |
 
@@ -59,6 +60,7 @@ npx pnpm@9.15.9 --filter frontend dev
 
 - `frontend/` — React + Vite + shadcn (заглушки)
 - `backend/` — NestJS + Prisma SQLite (пока только health)
-- `ai-service/` — FastAPI, stub GpuManager, Ollama text generate/stream
+- `ai-service/` — FastAPI, GpuManager, Ollama text, Flux image
 - `docker/` — Qdrant и MinIO (`quay.io/minio/minio`; Docker Hub `minio/minio` на этой машине недоступен)
 - `docs/plan/` — план разработки
+- `docs/GPU.md` — выгрузка Ollama, NF4, порог VRAM

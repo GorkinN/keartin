@@ -1,73 +1,94 @@
 # Этап 2. Flux + GpuManager
 
-**Статус:** не начат  
+**Статус:** выполнен, принят (2026-09-21)  
 **Зависимости:** [этап 1](01-text-generation.md) (умеем выгрузить LLM)  
 **Следующий этап:** [03-rag.md](03-rag.md)
 
-## Цель
+## Отчёт
+
+### Сделано
+
+- CUDA torch `2.13.0+cu126` + diffusers/bitsandbytes в `ai-service/pyproject.toml` и venv. `GET /health` → `cuda: ok`.
+- `GpuManager`: `acquire("llm"|"flux")` / `release()`. Перед Flux — unload Ollama (`keep_alive: 0` по `ps`, затем `ollama stop`), poll VRAM. Перед LLM — unload Flux, если загружен.
+- `POST /generate/image` (JSON) и `POST /generate/image/stream` (SSE `status` / `image_progress` / `done`).
+- Flux.1-dev NF4 + `enable_model_cpu_offload()` из `HF_HOME`, `local_files_only=True`. Ветка GGUF в том же модуле.
+- PNG в `data/tmp/` + `image_base64`, seed в ответе.
+- `GET /gpu/status`, `scripts/check-gpu.ps1`, [docs/GPU.md](../../GPU.md).
+
+### Как проверить
+
+Ollama запущена. FastAPI на `:8000`.
+
+```powershell
+.\scripts\check-gpu.ps1
+.\ai-service\.venv\Scripts\python -c "import httpx; c=httpx.Client(timeout=None, trust_env=False); c.post('http://127.0.0.1:8000/generate/text', json={'prompt':'ok','keep_alive':'5m'}); print(c.get('http://127.0.0.1:8000/gpu/status').json()); r=c.post('http://127.0.0.1:8000/generate/image', json={'prompt':'a cat holding a sign that says hello world','width':512,'height':512,'steps':20}); print(r.status_code, {k:r.json()[k] for k in r.json() if k!='image_base64'}); print(c.get('http://127.0.0.1:8000/gpu/status').json())"
+```
+
+| Проверка | Факт 2026-09-20 | Приёмка 2026-09-21 |
+|----------|-----------------|-------------------|
+| `GET /health` | `cuda: ok`, `hf_home` = `D:\huggingface_cache` | — |
+| После текста `keep_alive: 5m` | `ollama_models: [qwen3.5:9b-16k]`, VRAM ~7670 МБ | `qwen3.5:9b-16k`, 7574 МБ |
+| `POST /generate/image` 512² / 20 steps | 200, PNG в `data/tmp/`, seed в ответе | 200, `data/tmp/flux-20260921_212818-652960761.png`, seed `652960761` |
+| После картинки | `ollama_models: []`, VRAM ~1208 МБ | `[]`, 1187 МБ |
+| Кэш профиля | `%USERPROFILE%\.cache\huggingface` не создан | — |
+
+### Не вошло / отложено
+
+- Промпт картинки из текста поста — этап 4.
+- Nest-прокси, UI, StorageProvider / SQLite.
+- Генерация 1024×1024/28 steps в приёмке не гоняли (тот же путь, дольше). Smoke: 512×512/20.
+- GGUF-файл не скачивали: NF4 сработал.
+
+Архитектуру не ломали. Факты — в [docs/DECISIONS.md](../../DECISIONS.md) и [docs/GPU.md](../../GPU.md).
+
+---
+
+## Микро-план (зафиксирован до кода)
+
+Цель: одна картинка Flux с выгрузкой LLM до старта и Flux после. `example/image-gen/generate.py` (BF16) не копируем.
+
+### Файлы
+
+Создать: `gpu/nvidia.py`, `gpu/ollama_unload.py`, `image/flux_pipeline.py`, `api/gpu.py`, `docs/GPU.md`, `scripts/check-gpu.ps1`.
+
+Изменить: `gpu/manager.py`, `api/generate.py`, `settings.py`, `ollama_client.py`, `pyproject.toml`, `ARCHITECTURE.md`, `DECISIONS.md`.
+
+### GpuManager
+
+- `acquire("llm")`: lock → unload Flux если был → tenant=`llm`. После текста unload Ollama не форсировать.
+- `acquire("flux")`: lock → unload Ollama → poll `ps` пуст и VRAM idle → tenant=`flux`.
+- `release()` при `flux`: unload Flux + poll. При `llm`: только lock.
+- Не `taskkill` Ollama.
+
+### Flux
+
+- NF4 + CPU offload из `HF_HOME`. GGUF — ветка `FLUX_QUANT=gguf`.
+- Дефолт 1024×1024, 28 steps, seed в ответе.
+- PNG в `data/tmp/` + base64.
+
+### Контракты
+
+`POST /generate/image` — `{ prompt, width?, height?, steps?, seed? }` → `{ path, seed, width, height, steps, model, image_base64 }`.
+
+`POST /generate/image/stream` — SSE `status`, `image_progress`, `done`, `error`.
+
+`GET /gpu/status` — `{ locked, tenant, ollama_models, vram_used_mb }`.
+
+### Сознательно не делается
+
+Промпт из текста поста, RAG, Nest, UI, StorageProvider, прогрев LLM после Flux.
+
+---
+
+## Цель (исходная)
 
 Сгенерировать картинку Flux.1-dev с **гарантированной** выгрузкой LLM из VRAM до старта и выгрузкой Flux после. Самый опасный этап по железу.
-
-## Что делается
-
-- Полный GpuManager: `ps` → `stop` → poll VRAM → flux → unload → poll.
-- Обёртка Flux: repo id `FLUX_MODEL_ID` (дефолт `black-forest-labs/FLUX.1-dev`) из кэша `HF_HOME`. Если снимок уже есть — `local_files_only=True`. `FLUX_MODEL_PATH` — только override (GGUF / каталог вне кэша).
-- Стратегия загрузки (порядок fallback):
-  1. **Рабочий путь для 12 ГБ:** transformer + T5 в bitsandbytes **NF4** + `enable_sequential_cpu_offload()` (или `enable_model_cpu_offload()`).
-  2. Если Windows + bitsandbytes сломается: GGUF Q5_K_S / Q6_K через diffusers, путь в `FLUX_MODEL_PATH`.
-  3. FP8 — не первый путь (впритык на 12 ГБ).
-- Кэш: веса на `D:/huggingface_cache` / в RAM; в VRAM — только на время `generate`. Не качать в `%USERPROFILE%\.cache\huggingface`.
-- `POST /generate/image` + SSE `image_progress`.
-- После запроса — принудительный `unload_flux`.
-- `GET /gpu/status`: lock, tenant, `ollama ps`, used VRAM MB.
-- `scripts/check-gpu.ps1`.
-- `docs/GPU.md`.
-
-## Файлы и модули
-
-- `ai-service/app/gpu/manager.py`
-- `ai-service/app/gpu/nvidia.py` — парсинг `nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits`
-- `ai-service/app/gpu/ollama_unload.py`
-- `ai-service/app/image/flux_pipeline.py`
-- `ai-service/app/api/generate.py` (image router)
-- `docs/GPU.md`
-- `scripts/check-gpu.ps1`
-
-## Решения этапа
-
-- Размер по умолчанию 1024×1024.
-- 20–28 steps.
-- Seed возвращается в ответе.
-- ComfyUI не тащить.
-- Flux не класть в Docker.
-- Не гонять FP16/BF16 и BnB8.
-- Веса только через `HF_HOME` (и опциональный `FLUX_MODEL_PATH`).
-
-Не влезут в 12 ГБ:
-
-- FP16 сборка ~24–31 ГБ
-- BnB 8-bit peak ~24 ГБ
-- BnB 4-bit без offload peak ~17 ГБ
 
 ## Что сознательно не делается
 
 - Связка «текст поста → промпт картинки» (это этап 4).
 - Сохранение в StorageProvider / SQLite.
 - UI прогресса.
-
-## Как проверяется
-
-Сценарий:
-
-1. Загрузить LLM текстовым запросом (`ollama ps` не пуст, VRAM занята).
-2. `POST /generate/image` с простым английским промптом.
-3. В логах: unload LLM **до** загрузки Flux.
-4. Во время Flux: `ollama ps` пуст.
-5. После ответа: `nvidia-smi` близок к idle (ниже порога).
-6. Повторный вызов — VRAM не растёт (нет утечки).
-7. Веса взяты из `D:/huggingface_cache`, новый кэш в профиле пользователя не появился.
-
-Команды: `scripts/check-gpu.ps1` до, во время (второй терминал) и после.
 
 ## Критерий приёмки
 

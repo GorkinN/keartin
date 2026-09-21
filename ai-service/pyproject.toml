@@ -9,6 +9,17 @@ dependencies = [
     "httpx>=0.27.0",
     "python-dotenv>=1.0.1",
     "pydantic-settings>=2.6.0",
+    "torch",
+    "diffusers>=0.32.0",
+    "transformers>=4.44.0",
+    "accelerate>=0.34.0",
+    "bitsandbytes>=0.45.0",
+    "safetensors>=0.4.0",
+    "protobuf>=5.0.0",
+    "sentencepiece>=0.2.0",
+    "huggingface-hub>=0.26.0",
+    "pillow>=10.0.0",
+    "gguf>=0.10.0",
 ]
 
 [build-system]

@@ -37,6 +37,4 @@
 
 ## Текущий шаг
 
-Этап 1 принят (2026-09-20), отчёт в [stages/01-text-generation.md](stages/01-text-generation.md).
-
-Следующий шаг: микро-план **этапа 2** (Flux + GpuManager) → OK → код. Файл: [stages/02-image-gpu.md](stages/02-image-gpu.md).
+Этап 2 принят (2026-09-21), отчёт в [stages/02-image-gpu.md](stages/02-image-gpu.md). Следующий код — [этап 3](stages/03-rag.md) (RAG), после OK на микро-план.

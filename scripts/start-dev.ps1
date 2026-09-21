@@ -26,6 +26,7 @@ Get-Content $envFile | ForEach-Object {
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data\sqlite") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data\library") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $Root "data\posts") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $Root "data\tmp") | Out-Null
 
 Write-Host "Starting Docker (Qdrant + MinIO)..."
 docker compose -f docker/docker-compose.yml up -d

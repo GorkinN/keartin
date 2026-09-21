@@ -18,6 +18,18 @@ class Settings(BaseSettings):
     llm_num_ctx: int = 8192
     llm_keep_alive: str = "5m"
     qdrant_url: str = "http://127.0.0.1:6333"
+    gpu_free_mb_threshold: int = 500
+    flux_model_id: str = "black-forest-labs/FLUX.1-dev"
+    flux_quant: str = "nf4"
+    flux_model_path: str = ""
+
+    @field_validator("flux_quant")
+    @classmethod
+    def normalize_flux_quant(cls, value: str) -> str:
+        quant = value.strip().lower() or "nf4"
+        if quant not in {"nf4", "gguf"}:
+            raise ValueError("FLUX_QUANT must be nf4 or gguf")
+        return quant
 
     @field_validator("ollama_host")
     @classmethod

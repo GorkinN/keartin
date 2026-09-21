@@ -1,3 +1,4 @@
+from .errors import GpuError
 from .manager import GpuManager
 
-__all__ = ["GpuManager"]
+__all__ = ["GpuError", "GpuManager"]

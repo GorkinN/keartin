@@ -135,6 +135,31 @@ class OllamaClient:
         models = data.get("models")
         return models if isinstance(models, list) else []
 
+    async def unload_model(self, model: str) -> None:
+        """Drop a loaded model from VRAM. Called only from GpuManager."""
+        timeout = httpx.Timeout(connect=5.0, read=60.0, write=10.0, pool=5.0)
+        payload: dict[str, Any] = {
+            "model": model,
+            "prompt": "",
+            "keep_alive": 0,
+            "stream": False,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+                response = await client.post(
+                    f"{self._host}/api/generate",
+                    json=payload,
+                )
+        except httpx.HTTPError as exc:
+            raise OllamaError(
+                f"Ollama is unreachable: {exc}", status_code=503
+            ) from exc
+        if response.status_code >= 400:
+            raise OllamaError(
+                _error_message(response.status_code, response.text),
+                status_code=_map_status(response.status_code),
+            )
+
     async def _ndjson_stream(
         self,
         path: str,

@@ -1,6 +1,6 @@
 # Принятые решения
 
-Дата фиксации: 2026-09-20 (этапы 0–1). Источник дефолтов: [plan/03-decisions.md](plan/03-decisions.md).
+Дата фиксации: 2026-09-20 (этапы 0–2). Приёмка этапа 2: 2026-09-21. Источник дефолтов: [plan/03-decisions.md](plan/03-decisions.md).
 
 | # | Решение | Статус |
 |---|---------|--------|
@@ -33,3 +33,13 @@
 - Вызовы Ollama оборачиваются в stub `GpuManager.acquire("llm")`.
 - httpx к localhost: `trust_env=False`, чтобы системный `HTTP_PROXY` не ломал Ollama/Qdrant.
 - Системный `OLLAMA_HOST=0.0.0.0` (bind-адрес сервиса Ollama) нормализуется в клиентский URL `http://127.0.0.1:11434`. Имя переменной не меняли.
+
+## Решения этапа 2
+
+- Torch в venv: `2.13.0+cu126` с `https://download.pytorch.org/whl/cu126`, не CPU-колесо с PyPI. `GET /health` → `cuda: ok`.
+- NF4 + `enable_model_cpu_offload()`. Sequential offload + bitsandbytes на T5: `Cannot copy out of meta tensor`.
+- Проверка кэша по `model_index.json` + `transformer/`, не через полный `snapshot_download` (в кэше нет LICENSE/README — веса на месте).
+- Idle VRAM Windows ~1.1 ГБ > `GPU_FREE_MB_THRESHOLD=500`. Poll считает idle, если used < 500 **или** < 4096 МБ после выгрузки моделей.
+- GGUF-ветка есть (`FLUX_QUANT=gguf` + `FLUX_MODEL_PATH`). NF4 на этой машине прошёл, GGUF-файл не качали.
+- Картинка этапа 2: `data/tmp/flux-*.png` + `image_base64`. StorageProvider / Nest / UI — позже.
+- Приёмка 2026-09-21: после текста 7574 МБ / `qwen3.5:9b-16k`; 512²/20 → 200; после Flux 1187 МБ, `ollama_models: []`.
