@@ -1,8 +1,36 @@
 # Этап 4. Полный AI-pipeline
 
-**Статус:** не начат  
+**Статус:** выполнен, принят (2026-09-21)  
 **Зависимости:** [этап 1](01-text-generation.md), [этап 2](02-image-gpu.md), [этап 3](03-rag.md)  
 **Следующий этап:** [05-nestjs.md](05-nestjs.md)
+
+## Отчёт
+
+### Сделано
+
+- `POST /pipeline/stream` — retrieve → русский текст → английский image prompt → `acquire("flux")` (выгрузка Ollama) → PNG.
+- `POST /pipeline/text/stream` — только текст, файл `post.txt`. `POST /pipeline/image/stream` — картинка по готовому `text`, `post.txt` не трогает.
+- Артефакты: `data/tmp/pipeline/<job_id>/` (`post.txt`, `image_prompt.txt`, `image.png`).
+- `rag` без `book_ids` или с 0 хитов — SSE «недостаточно контекста», LLM не вызывается. Контекст в промпт режется по score до 10 000 символов.
+- Промпты: `ai-service/app/prompts/post_ru.md`, `image_prompt.md`. Юнит-тесты `ai-service/tests/pipeline/` (вместе с RAG: 25 passed).
+
+### Как проверить
+
+FastAPI на `:8000`, Qdrant и книга `book-txt` уже проиндексированы. В PowerShell `curl` — это `Invoke-WebRequest`; нужен `curl.exe` или httpx.
+
+```powershell
+curl.exe -N -X POST http://127.0.0.1:8000/pipeline/stream -H "Content-Type: application/json" -d '{"topic":"цена и спрос","knowledge_mode":"rag","book_ids":["book-txt"],"structure":{"hooks":true,"body":true,"cta":false}}'
+```
+
+Приёмка пользователем (2026-09-21): этот запрос (`rag`, `book-txt`, CTA выключен) запустился успешно.
+
+### Не вошло / отложено
+
+- SQLite, StorageProvider, `post.md` / `meta.json`, Nest, UI, CRUD пресетов. Это этап 5.
+
+Факты — в [docs/DECISIONS.md](../../DECISIONS.md) и [docs/ARCHITECTURE.md](../../ARCHITECTURE.md).
+
+---
 
 ## Цель
 

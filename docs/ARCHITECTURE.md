@@ -1,6 +1,6 @@
 # Архитектура
 
-Черновик после **этапа 3** (принят 2026-09-21). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
+Черновик после **этапа 4** (принят 2026-09-21). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
 
 ## Принцип
 
@@ -8,14 +8,13 @@
 
 Прямой вызов UI → FastAPI запрещён. Приёмка генерации — curl/httpx к FastAPI. Nest и UI картинку не проксируют.
 
-## Что есть после этапа 3
+## Что есть после этапа 4
 
-- Всё из этапов 0–2: health, Ollama text, Flux NF4 + GpuManager, Qdrant в compose.
-- FastAPI RAG: `POST /rag/index` (202 + job), `GET /rag/index/{job_id}`, `POST /rag/search`, `DELETE /rag/books/{book_id}`.
-- Парсеры PDF/EPUB/FB2/DOCX/TXT, чанкер, `BAAI/bge-m3` на CPU из `HF_HOME`, коллекция Qdrant `library_chunks`.
-- `scripts/download-bge-m3.ps1`. Джобы индексации в памяти процесса.
+- Всё из этапов 0–3: health, Ollama text, Flux NF4 + GpuManager, Qdrant, RAG.
+- FastAPI pipeline: `POST /pipeline/stream`, `POST /pipeline/text/stream`, `POST /pipeline/image/stream`.
+- Артефакты джобы: `data/tmp/pipeline/<job_id>/` (`post.txt`, `image_prompt.txt`, `image.png`).
 
-StorageProvider не подключён. Nest и UI генерацию и библиотеку не проксируют. Пайплайн поста — этап 4.
+StorageProvider не подключён. Nest и UI генерацию и библиотеку не проксируют. `post.md` / `meta.json` / SQLite — этап 5.
 
 ## Порты
 
@@ -75,3 +74,17 @@ TRANSFORMERS_CACHE=D:/huggingface_cache/transformers
 - Скан PDF без текстового слоя → `error` по книге, не падение сервиса.
 
 Подробности: [RAG.md](RAG.md).
+
+## Pipeline поста
+
+Один SSE на FastAPI. Ollama только под `acquire("llm")`, Flux только под `acquire("flux")`. `acquire("flux")` выгружает Ollama до загрузки весов. Между release LLM и acquire Flux второй запрос ждёт тот же lock.
+
+- `POST /pipeline/stream` — retrieve (если не `general`) → стрим русского текста → английский image prompt той же LLM (`think: false`) → `gpu_unload_llm` → Flux → файлы джобы.
+- `POST /pipeline/text/stream` — тот же текст без Flux. Пишет только `post.txt`.
+- `POST /pipeline/image/stream` — `{ "text" }` → image prompt → Flux. `post.txt` не пишет и не меняет.
+
+Тело поста: `topic`, `tone` (пусто → «живой, разговорный»), `length` `S|M|L` (около 500 / 1200 / 2500 символов), `emoji` default false, `knowledge_mode` default `rag`, `citations` default false, `structure` `{hooks, body, cta}` default все true, `book_ids`, `top_k` default 10 (1–20), `preset` `{description, examples}` до 5 примеров. Картинка: `width` / `height` / `steps` / `seed`, дефолт 1024×1024 и 28 steps. `job_id` опционален (`[A-Za-z0-9-]{1,80}`).
+
+SSE: `status` (`start`, `retrieve`, `text`, `image_prompt`, `load_flux`, `generate`, `unload_flux`; в data есть `job_id`), `token` `{"text"}`, `text_done` `{"text","sources"}`, `image_prompt` `{"prompt"}`, `gpu_unload_llm` `{"ok": true}`, `image_progress` `{"step","total"}`, `image_done` `{"path","seed","prompt"}`, `error` `{"message"}`.
+
+Режимы: `general` без retrieval. `rag` без `book_ids` или с 0 хитов — `error` «недостаточно контекста», LLM не вызывается. `rag_plus` с пустым поиском пишет по общим знаниям, без выдуманных цитат. Выключенный блок структуры в промпт не попадает. `citations: false` — в промпт не попадают `source_name`. Хиты режутся по score, пока текст контекста ≤ 10 000 символов. Flux получает одну английскую строку, без negative.

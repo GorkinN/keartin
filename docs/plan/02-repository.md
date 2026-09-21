@@ -6,7 +6,7 @@
 
 Веса Hugging Face **не** в репозитории и не в `data/`. Каталог `D:/huggingface_cache` снаружи git; путь только через env.
 
-## Сейчас (после этапа 1)
+## Сейчас (после этапа 4)
 
 ```
 llm-keartin/
@@ -42,18 +42,20 @@ llm-keartin/
       main.py
       bootstrap.py           # .env + HF_* до импорта HF
       settings.py
-      api/health.py
-      api/generate.py
-      gpu/manager.py         # stub acquire/release
+      api/                   # health, generate, gpu, rag, pipeline
+      gpu/manager.py
+      image/flux_pipeline.py
       llm/ollama_client.py
-      prompts/text_system.md
+      rag/                   # парсеры, чанкер, bge-m3 CPU, Qdrant
+      pipeline/post_pipeline.py
+      prompts/               # text_system.md, post_ru.md, image_prompt.md
   scripts/
     start-dev.ps1
   example/                   # CLI-прототип Flux, не часть сервиса
   data/                      # gitignore
 ```
 
-Ещё нет (появятся на своих этапах): `frontend/src/api`, `frontend/src/hooks`, Nest-модули library/posts/presets/generate/storage, Python `pipeline/`.
+Ещё нет (появятся на своих этапах): `frontend/src/api`, `frontend/src/hooks`, Nest-модули library/posts/presets/generate/storage. Python `pipeline/` есть с этапа 4.
 
 ## Целевое дерево (к этапу 7)
 
