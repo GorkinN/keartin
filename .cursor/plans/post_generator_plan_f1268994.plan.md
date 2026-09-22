@@ -4,22 +4,22 @@ overview: "Поэтапный план локального веб-прилож�
 todos:
   - id: stage-0
     content: "Этап 0: каркас монорепо, health-checks, docker-compose, docs"
-    status: pending
+    status: completed
   - id: stage-1
     content: "Этап 1: Ollama text generation + SSE, выбор LLM и num_ctx"
-    status: pending
+    status: completed
   - id: stage-2
     content: "Этап 2: GpuManager + Flux NF4/offload, unload Ollama, VRAM-checks"
-    status: pending
+    status: completed
   - id: stage-3
     content: "Этап 3: Парсеры, чанкинг, bge-m3 CPU, Qdrant RAG"
-    status: pending
+    status: completed
   - id: stage-4
     content: "Этап 4: Полный AI-pipeline с SSE и exclusive GPU"
-    status: pending
+    status: completed
   - id: stage-5
     content: "Этап 5: NestJS API, Prisma/SQLite, StorageProvider FS/S3"
-    status: pending
+    status: completed
   - id: stage-6
     content: "Этап 6: React UI — библиотека, генерация, история, пресеты"
     status: pending

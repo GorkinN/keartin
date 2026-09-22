@@ -1,6 +1,6 @@
 # Архитектура
 
-После **этапа 5** (код 2026-09-22, приёмка не закрыта). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
+После **этапа 5** (принят 2026-09-22). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
 
 ## Принцип
 
@@ -31,7 +31,7 @@
 | `GET/POST/PATCH/DELETE` | `/presets` | `name`, `description`, `examples` (до 5). Удаление пресета обнуляет `presetId` у постов |
 | `GET` | `/posts`, `/posts/:id` | список и карточка, новые сверху |
 | `DELETE` | `/posts/:id` | БД и папка. Во время генерации этого поста — `409` |
-| `POST` | `/posts/:id/open-folder` | `explorer.exe` только при `STORAGE_DRIVER=fs` и Windows. Иначе `400` |
+| `POST` | `/posts/:id/open-folder` | `200`. `explorer.exe` только при `STORAGE_DRIVER=fs` и Windows. Иначе `400` |
 | `POST` | `/generate/posts` | `202 { jobId, postId }`. Тело: `topic`, `tone`, `length` S/M/L, `emoji`, `knowledgeMode`, `citations`, `structure`, `bookIds`, `topK`, `presetId`, `temperature`, `width`, `height`, `steps`, `seed` |
 | `GET` | `/generate/posts/:id/events` | SSE, события Python как есть |
 | `POST` | `/posts/:id/regenerate-text` | новый job, тот же URL событий. Перезаписывает `post.md` / `post.txt`, картинку не трогает |

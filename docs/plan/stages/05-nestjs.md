@@ -1,6 +1,6 @@
 # Этап 5. NestJS-бэкенд
 
-**Статус:** код готов, ждёт приёмки (2026-09-22)  
+**Статус:** выполнен, принят (2026-09-22)  
 **Зависимости:** [этап 4](04-pipeline.md)  
 **Следующий этап:** [06-frontend.md](06-frontend.md)
 
@@ -11,7 +11,8 @@
 - Prisma: `Book`, `Post`, `StylePreset`, `GenerationJob`. Миграция `backend/prisma/migrations/20260922180000_stage5`.
 - REST библиотеки, пресетов, постов и генерации, как в микро-плане. SSE `GET /generate/posts/:id/events` отдаёт события Python без переименования.
 - `StorageProvider`: `LocalFsProvider` и `S3Provider` (`STORAGE_DRIVER=fs|s3`). При s3 файл для `POST /rag/index` сначала пишется в `data/tmp/index/<bookId>/`.
-- Успешный полный SSE пишет пять файлов и строку поста. Повтор текста не трогает картинку, повтор картинки не передаёт старый seed.
+- Успешный полный SSE пишет пять файлов и строку поста. `post.md` и `post.txt` — один текст. Повтор текста не трогает картинку, повтор картинки не передаёт старый seed.
+- `POST /posts/:id/open-folder` отвечает `200` и на Windows при `STORAGE_DRIVER=fs` открывает Explorer. При `s3` — `400`.
 - Рестарт Nest: висящие джобы `failed`, книги в `indexing` — `error`.
 - Контракт — в [docs/ARCHITECTURE.md](../../ARCHITECTURE.md). Решения — в [docs/DECISIONS.md](../../DECISIONS.md).
 
@@ -32,7 +33,12 @@ npx pnpm@9.15.9 --filter backend start
 6. `DELETE /library/books/:id` убирает папку и векторы. Пост остаётся.
 7. `STORAGE_DRIVER=s3` (и `S3_*` из `.env.example`) — тот же сценарий, объекты в бакете `library`. `open-folder` отвечает `400`.
 
-Без GPU уже проверено: `GET /health`, CRUD пресета в UTF-8, `400` на пустую тему и чужой файл, `409` на `rag` без книг, `404` на чужой пресет, `502` если FastAPI выключен (книга остаётся в `error`, файл и `meta.json` на диске). Полный цикл с картинкой и MinIO в этой сессии не гонялись: FastAPI и Docker были выключены.
+Приёмка 2026-09-22, TXT «цена и спрос», `rag`, длина S, картинка 512×512 / 20 steps:
+
+- `fs`: upload `202` → `ready 1/1` → SSE до `image_done` (текст 671 символ, seed `976798591`, PNG 391 КБ). Папка `data/posts/2026-09-22_tsena-i-spros`, пять файлов, `post.md` = `post.txt`. `open-folder` → `200`. Удаление книги убрало `data/library/<id>` и векторы; пост остался `ready`.
+- `s3`: тот же цикл, объекты в бакете `library` (`posts/2026-09-22_tsena-i-spros-2`, PNG 205 КБ). `open-folder` → `400`. После удаления книги ключей `library/<id>/` нет, хитов в Qdrant 0, пост на месте.
+
+До этого без GPU: CRUD пресета в UTF-8, `400` / `404` / `409`, `502` при выключенном FastAPI (книга остаётся `error`, файл и `meta.json` на диске).
 
 ### Не вошло / отложено
 

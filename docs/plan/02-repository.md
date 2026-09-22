@@ -6,7 +6,7 @@
 
 Веса Hugging Face **не** в репозитории и не в `data/`. Каталог `D:/huggingface_cache` снаружи git; путь только через env.
 
-## Сейчас (после этапа 4)
+## Сейчас (после этапа 5)
 
 ```
 llm-keartin/
@@ -31,11 +31,18 @@ llm-keartin/
         ui/                  # button, card
       lib/utils.ts
   backend/
-    prisma/schema.prisma     # SQLite, без бизнес-моделей
+    prisma/schema.prisma     # Book, Post, StylePreset, GenerationJob
+    prisma/migrations/
     src/
       app.module.ts
       main.ts
       health/
+      library/
+      posts/
+      presets/
+      generate/
+      storage/               # fs | s3
+      ai/python.client.ts
   ai-service/
     pyproject.toml
     app/
@@ -55,7 +62,7 @@ llm-keartin/
   data/                      # gitignore
 ```
 
-Ещё нет (появятся на своих этапах): `frontend/src/api`, `frontend/src/hooks`, Nest-модули library/posts/presets/generate/storage. Python `pipeline/` есть с этапа 4.
+Ещё нет (этап 6): `frontend/src/api`, `frontend/src/hooks`. Экраны фронтенда по-прежнему заглушки. Nest-модули library/posts/presets/generate/storage есть с этапа 5.
 
 ## Целевое дерево (к этапу 7)
 
