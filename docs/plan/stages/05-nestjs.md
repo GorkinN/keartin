@@ -1,8 +1,45 @@
 # Этап 5. NestJS-бэкенд
 
-**Статус:** не начат  
+**Статус:** код готов, ждёт приёмки (2026-09-22)  
 **Зависимости:** [этап 4](04-pipeline.md)  
 **Следующий этап:** [06-frontend.md](06-frontend.md)
+
+## Отчёт
+
+### Сделано
+
+- Prisma: `Book`, `Post`, `StylePreset`, `GenerationJob`. Миграция `backend/prisma/migrations/20260922180000_stage5`.
+- REST библиотеки, пресетов, постов и генерации, как в микро-плане. SSE `GET /generate/posts/:id/events` отдаёт события Python без переименования.
+- `StorageProvider`: `LocalFsProvider` и `S3Provider` (`STORAGE_DRIVER=fs|s3`). При s3 файл для `POST /rag/index` сначала пишется в `data/tmp/index/<bookId>/`.
+- Успешный полный SSE пишет пять файлов и строку поста. Повтор текста не трогает картинку, повтор картинки не передаёт старый seed.
+- Рестарт Nest: висящие джобы `failed`, книги в `indexing` — `error`.
+- Контракт — в [docs/ARCHITECTURE.md](../../ARCHITECTURE.md). Решения — в [docs/DECISIONS.md](../../DECISIONS.md).
+
+### Как проверить
+
+Нужны Nest `:3000`, FastAPI `:8000`, Qdrant. Для S3 — запущенный Docker и MinIO. В PowerShell `curl` — это `Invoke-WebRequest`; для тел и SSE нужен `curl.exe`.
+
+```powershell
+npx pnpm@9.15.9 --filter backend prisma:deploy
+npx pnpm@9.15.9 --filter backend start
+```
+
+1. `POST /library/books` с PDF или TXT → `202`, затем `GET /library/books/:id` доходит до `ready`.
+2. `POST /presets` с `name`.
+3. `POST /generate/posts` (`knowledgeMode: rag`, `bookIds` этой книги) → `202 { jobId, postId }`. `curl.exe -N` на `/generate/posts/:jobId/events` до `image_done`.
+4. В SQLite есть пост; на диске `data/posts/YYYY-MM-DD_slug/` с пятью файлами. `post.md` и `post.txt` совпадают.
+5. `POST /posts/:id/open-folder` открывает Explorer.
+6. `DELETE /library/books/:id` убирает папку и векторы. Пост остаётся.
+7. `STORAGE_DRIVER=s3` (и `S3_*` из `.env.example`) — тот же сценарий, объекты в бакете `library`. `open-folder` отвечает `400`.
+
+Без GPU уже проверено: `GET /health`, CRUD пресета в UTF-8, `400` на пустую тему и чужой файл, `409` на `rag` без книг, `404` на чужой пресет, `502` если FastAPI выключен (книга остаётся в `error`, файл и `meta.json` на диске). Полный цикл с картинкой и MinIO в этой сессии не гонялись: FastAPI и Docker были выключены.
+
+### Не вошло / отложено
+
+- UI, CORS, отмена джобы, `409` на второй параллельный generate. Это этапы 6–7.
+- EventSource сам переподключается, когда сервер закрывает поток. Клиент этапа 6 должен закрывать источник на `image_done` и `error`.
+
+---
 
 ## Цель
 

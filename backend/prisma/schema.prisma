@@ -6,3 +6,74 @@ datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
 }
+
+model Book {
+  id          String   @id
+  filename    String
+  format      String
+  storageKey  String
+  status      String
+  indexJobId  String?
+  error       String?
+  chunksTotal Int      @default(0)
+  chunksDone  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StylePreset {
+  id          String   @id @default(cuid())
+  name        String
+  description String   @default("")
+  examples    String   @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  posts       Post[]
+}
+
+model Post {
+  id            String         @id @default(cuid())
+  topic         String
+  tone          String         @default("")
+  length        String         @default("M")
+  emoji         Boolean        @default(false)
+  knowledgeMode String         @default("rag")
+  citations     Boolean        @default(false)
+  hooks         Boolean        @default(true)
+  body          Boolean        @default(true)
+  cta           Boolean        @default(true)
+  bookIds       String         @default("[]")
+  topK          Int            @default(10)
+  presetId      String?
+  preset        StylePreset?   @relation(fields: [presetId], references: [id], onDelete: SetNull)
+  temperature   Float?
+  width         Int            @default(1024)
+  height        Int            @default(1024)
+  steps         Int            @default(28)
+  imageSeed     Int?
+  text          String         @default("")
+  imagePrompt   String         @default("")
+  imageKey      String         @default("")
+  storagePrefix String         @unique
+  slug          String
+  llmModel      String         @default("")
+  fluxModel     String         @default("")
+  sources       String         @default("[]")
+  status        String         @default("draft")
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  jobs          GenerationJob[]
+}
+
+model GenerationJob {
+  id        String   @id
+  postId    String
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  kind      String
+  status    String
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([postId, status])
+}

@@ -1,20 +1,47 @@
 # Архитектура
 
-Черновик после **этапа 4** (принят 2026-09-21). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
+После **этапа 5** (код 2026-09-22, приёмка не закрыта). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
 
 ## Принцип
 
 Браузер говорит **только с NestJS**. Python FastAPI — изолированный AI-воркер с эксклюзивным доступом к GPU. Docker — только Qdrant и MinIO (без GPU). Ollama и Flux живут на хосте Windows.
 
-Прямой вызов UI → FastAPI запрещён. Приёмка генерации — curl/httpx к FastAPI. Nest и UI картинку не проксируют.
+Прямой вызов UI → FastAPI запрещён. Продуктовый цикл — REST/SSE Nest `:3000`. FastAPI остаётся внутренним воркером.
 
-## Что есть после этапа 4
+## Что есть после этапа 5
 
-- Всё из этапов 0–3: health, Ollama text, Flux NF4 + GpuManager, Qdrant, RAG.
-- FastAPI pipeline: `POST /pipeline/stream`, `POST /pipeline/text/stream`, `POST /pipeline/image/stream`.
-- Артефакты джобы: `data/tmp/pipeline/<job_id>/` (`post.txt`, `image_prompt.txt`, `image.png`).
+- Всё из этапов 0–4: health, Ollama text, Flux NF4 + GpuManager, Qdrant, RAG, pipeline.
+- Nest: SQLite (Prisma), библиотека, пресеты, посты, джобы генерации, StorageProvider `fs|s3`.
+- UI по-прежнему заглушки и в FastAPI не ходит. Авторизации и редактора поста нет.
 
-StorageProvider не подключён. Nest и UI генерацию и библиотеку не проксируют. `post.md` / `meta.json` / SQLite — этап 5.
+Временные файлы пайплайна Python: `data/tmp/pipeline/<job_id>/`. Продуктовые файлы пишет Nest.
+
+## Nest API
+
+Префикса `/api` нет. JSON camelCase. `sources[]` в БД и `meta.json` тоже camelCase; в SSE остаются поля Python (`book_id`, `chunk_index`, `source_name`).
+
+Книга: `indexing | ready | error`. Джоба: `running | succeeded | failed`. Пост: `draft | ready | failed`. После рестарта Nest висящие джобы → `failed` («прервано перезапуском»), книги в `indexing` → `error`. Черновик поста при этом тоже `failed`.
+
+| Метод | Путь | Ответ |
+|--------|------|--------|
+| `POST` | `/library/books` | multipart поле `file` (pdf, epub, fb2, docx, txt, до 200 МБ). `202` и книга, статус `indexing`. Nest копирует файл в storage и только потом вызывает `POST /rag/index` с тем же `book_id`. |
+| `GET` | `/library/books`, `/library/books/:id` | список / одна. Прогресс чанков Nest пишет сам, опрашивая Python |
+| `POST` | `/library/books/:id/reindex` | `202`. Пока статус `indexing` — `409` |
+| `DELETE` | `/library/books/:id` | векторы через Python, затем storage. Посты не удаляются. `indexing` → `409`. Python недоступен → `502`, книга остаётся |
+| `GET/POST/PATCH/DELETE` | `/presets` | `name`, `description`, `examples` (до 5). Удаление пресета обнуляет `presetId` у постов |
+| `GET` | `/posts`, `/posts/:id` | список и карточка, новые сверху |
+| `DELETE` | `/posts/:id` | БД и папка. Во время генерации этого поста — `409` |
+| `POST` | `/posts/:id/open-folder` | `explorer.exe` только при `STORAGE_DRIVER=fs` и Windows. Иначе `400` |
+| `POST` | `/generate/posts` | `202 { jobId, postId }`. Тело: `topic`, `tone`, `length` S/M/L, `emoji`, `knowledgeMode`, `citations`, `structure`, `bookIds`, `topK`, `presetId`, `temperature`, `width`, `height`, `steps`, `seed` |
+| `GET` | `/generate/posts/:id/events` | SSE, события Python как есть |
+| `POST` | `/posts/:id/regenerate-text` | новый job, тот же URL событий. Перезаписывает `post.md` / `post.txt`, картинку не трогает |
+| `POST` | `/posts/:id/regenerate-image` | то же для `image.png`, `image_prompt.txt` и seed. Seed в Python не передаётся, чтобы картинка была новой |
+
+`rag` без книг или с книгой не в `ready` — `409` до вызова Python. Неизвестный пресет или книга — `404`. FastAPI недоступен до старта — `502`, строка поста не создаётся. «Недостаточно контекста», Ollama и GPU приходят событием `error`, джоба `failed`. Параллельный generate ждёт lock в Python; отдельный `409` на занятый GPU — этап 7.
+
+Успешный SSE сам записывает пост. `post.md` и `post.txt` — один текст. Папка `data/posts/YYYY-MM-DD_slug/` (транслит темы, при коллизии `-2`). Ключи в SQLite относительные (`posts/.../image.png`), одни и те же для fs и s3. `meta.json` дублирует поля поста. `models.llm` / `models.flux` берутся из `LLM_MODEL` и `FLUX_MODEL_ID`.
+
+`STORAGE_DRIVER=fs` (дефолт) пишет в `data/`. `s3` — бакет `S3_BUCKET` (дефолт `library`) на `MINIO_ENDPOINT`, path-style, ключи те же. Перед индексацией при s3 Nest кладёт файл в `data/tmp/index/<bookId>/`: Python принимает только локальный путь.
 
 ## Порты
 

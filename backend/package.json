@@ -6,14 +6,18 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "build": "nest build",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "prisma:deploy": "node ./scripts/with-root-env.cjs migrate deploy",
+    "test:unit": "ts-node --transpile-only test/units.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1137.0",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
     "@nestjs/platform-express": "^11.0.0",
     "@prisma/client": "^6.16.0",
     "dotenv": "^16.4.7",
+    "multer": "^2.4.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
   },
@@ -21,6 +25,7 @@
     "@nestjs/cli": "^11.0.0",
     "@nestjs/schematics": "^11.0.0",
     "@types/express": "^5.0.0",
+    "@types/multer": "^2.2.0",
     "@types/node": "^22.10.0",
     "prisma": "^6.16.0",
     "ts-node": "^10.9.2",
