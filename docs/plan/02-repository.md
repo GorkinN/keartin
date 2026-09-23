@@ -62,7 +62,7 @@ llm-keartin/
   data/                      # gitignore
 ```
 
-Ещё нет (этап 6): `frontend/src/api`, `frontend/src/hooks`. Экраны фронтенда по-прежнему заглушки. Nest-модули library/posts/presets/generate/storage есть с этапа 5.
+С этапа 6: `frontend/src/api`, `frontend/src/hooks`, рабочие экраны библиотеки, создания, истории и пресетов. Nest-модули library/posts/presets/generate/storage есть с этапа 5. `GET /posts/:id/image` отдаёт PNG.
 
 ## Целевое дерево (к этапу 7)
 

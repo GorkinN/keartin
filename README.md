@@ -21,18 +21,7 @@ Copy-Item .env.example .env
 .\scripts\start-dev.ps1
 ```
 
-Три терминала из корня репозитория:
-
-```powershell
-# 1. AI-сервис
-.\ai-service\.venv\Scripts\python -m uvicorn app.main:app --reload --reload-dir ai-service/app --app-dir ai-service --host 127.0.0.1 --port 8000
-
-# 2. NestJS
-npx pnpm@9.15.9 --filter backend start:dev
-
-# 3. Frontend
-npx pnpm@9.15.9 --filter frontend dev
-```
+Скрипт поднимает Qdrant и MinIO, применяет миграции Prisma и открывает три окна: FastAPI `:8000`, Nest `:3000`, Vite `:5173`. Повторный запуск не стартует сервис, если порт уже занят. Ollama нужна отдельно. UI: http://127.0.0.1:5173
 
 Проверки:
 

@@ -1,10 +1,131 @@
-import { PlaceholderPage } from "./placeholder";
+import { useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, errorMessage } from "@/api/client";
+import { bookStatusLabel } from "@/api/labels";
+import type { Book } from "@/api/types";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ErrorText } from "@/components/error-text";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 
 export function LibraryPage() {
+  const queryClient = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Book | null>(null);
+  const books = useQuery({
+    queryKey: ["books"],
+    queryFn: () => api<Book[]>("/library/books"),
+    refetchInterval: (query) => (query.state.data?.some((book) => book.status === "indexing") ? 2000 : false),
+  });
+
+  const upload = useMutation({
+    mutationFn: (file: File) => {
+      const body = new FormData();
+      body.append("file", file);
+      return api<Book>("/library/books", { method: "POST", body });
+    },
+    onSuccess: async () => {
+      setActionError(null);
+      await queryClient.invalidateQueries({ queryKey: ["books"] });
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
+
+  const reindex = useMutation({
+    mutationFn: (id: string) => api<Book>(`/library/books/${id}/reindex`, { method: "POST" }),
+    onSuccess: async () => {
+      setActionError(null);
+      await queryClient.invalidateQueries({ queryKey: ["books"] });
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api<{ ok: true }>(`/library/books/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      setDeleteTarget(null);
+      setActionError(null);
+      await queryClient.invalidateQueries({ queryKey: ["books"] });
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
+
   return (
-    <PlaceholderPage
-      title="Библиотека"
-      description="Загрузка и индекс материалов появятся на следующих этапах."
-    />
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-2xl font-semibold">Библиотека</h1>
+        <Button type="button" onClick={() => fileRef.current?.click()} disabled={upload.isPending}>
+          {upload.isPending ? "Загрузка…" : "Загрузить"}
+        </Button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".pdf,.epub,.fb2,.docx,.txt"
+          className="hidden"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) upload.mutate(file);
+          }}
+        />
+      </div>
+      <ErrorText message={books.isError ? errorMessage(books.error) : actionError} />
+      {books.isPending ? <p className="text-sm text-muted-foreground">Загрузка…</p> : null}
+      {books.data && books.data.length === 0 ? (
+        <Card>
+          <p className="text-sm text-muted-foreground">Книг пока нет. Загрузите PDF, EPUB, FB2, DOCX или TXT.</p>
+        </Card>
+      ) : null}
+      <div className="space-y-3">
+        {books.data?.map((book) => {
+          const percent = book.chunksTotal > 0 ? (book.chunksDone / book.chunksTotal) * 100 : 0;
+          return (
+            <Card key={book.id}>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 space-y-1">
+                  <p className="truncate font-medium">{book.filename}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {book.format} · {bookStatusLabel(book.status)}
+                    {book.chunksTotal > 0 ? ` · ${book.chunksDone}/${book.chunksTotal}` : ""}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={book.status === "indexing" || reindex.isPending}
+                    onClick={() => reindex.mutate(book.id)}
+                  >
+                    Переиндексировать
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setDeleteTarget(book)}>
+                    Удалить
+                  </Button>
+                </div>
+              </div>
+              {book.status === "indexing" && book.chunksTotal > 0 ? <Progress value={percent} /> : null}
+              {book.error ? <p className="text-sm text-destructive">{book.error}</p> : null}
+            </Card>
+          );
+        })}
+      </div>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Удалить книгу?"
+        description={deleteTarget ? `«${deleteTarget.filename}» исчезнет из библиотеки. Посты останутся.` : ""}
+        confirmLabel="Удалить"
+        pending={remove.isPending}
+        error={remove.isError ? errorMessage(remove.error) : null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        onConfirm={() => {
+          if (deleteTarget) remove.mutate(deleteTarget.id);
+        }}
+      />
+    </div>
   );
 }

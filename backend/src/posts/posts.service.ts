@@ -31,6 +31,17 @@ export class PostsService {
     return toPostDto(post, await this.activeJobId(id));
   }
 
+  async readImage(id: string): Promise<Buffer> {
+    const post = await this.find(id);
+    if (!post.imageKey) throw new NotFoundException("картинка ещё не готова");
+    try {
+      return await this.storage.getBytes(post.imageKey);
+    } catch (error) {
+      if (isMissingObject(error)) throw new NotFoundException("картинка не найдена");
+      throw error;
+    }
+  }
+
   async remove(id: string): Promise<{ ok: true }> {
     const post = await this.find(id);
     const running = await this.prisma.generationJob.count({
@@ -81,4 +92,12 @@ export class PostsService {
     });
     return job?.id ?? null;
   }
+}
+
+function isMissingObject(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const record = error as { code?: unknown; name?: unknown; $metadata?: { httpStatusCode?: number } };
+  if (record.code === "ENOENT") return true;
+  if (record.name === "NoSuchKey" || record.name === "NotFound") return true;
+  return record.$metadata?.httpStatusCode === 404;
 }

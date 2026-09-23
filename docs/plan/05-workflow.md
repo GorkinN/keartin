@@ -37,4 +37,4 @@
 
 ## Текущий шаг
 
-Этап 5 принят (2026-09-22), отчёт в [stages/05-nestjs.md](stages/05-nestjs.md). Следующий код — [этап 6](stages/06-frontend.md) после OK на микро-план.
+Этап 6 выполнен (2026-09-23), отчёт в [stages/06-frontend.md](stages/06-frontend.md), ждёт приёмки. Следующий код — [этап 7](stages/07-polish.md) после OK.

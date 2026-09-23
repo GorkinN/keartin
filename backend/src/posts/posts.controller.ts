@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, HttpCode, Param, Post } from "@nestjs/common";
+import { Controller, Delete, Get, Header, HttpCode, Param, Post, StreamableFile } from "@nestjs/common";
 import { GenerateService } from "../generate/generate.service";
 import { PostsService } from "./posts.service";
 
@@ -12,6 +12,13 @@ export class PostsController {
   @Get()
   list() {
     return this.posts.list();
+  }
+
+  @Get(":id/image")
+  @Header("Cache-Control", "private, max-age=86400")
+  async image(@Param("id") id: string): Promise<StreamableFile> {
+    const bytes = await this.posts.readImage(id);
+    return new StreamableFile(bytes, { type: "image/png", disposition: "inline" });
   }
 
   @Get(":id")
