@@ -11,7 +11,7 @@ import type { Response } from "express";
 import { readFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
-import { PythonClient } from "../ai/python.client";
+import { PythonClient, PythonRequestError } from "../ai/python.client";
 import type { SseEvent } from "../ai/sse";
 import { isRecord, parseStringArray, sourcesFromEvent } from "../common/json";
 import { AppEnv } from "../config/env";
@@ -51,12 +51,44 @@ export class GenerateService {
     return this.launch(post.id, "text");
   }
 
-  async regenerateImage(postId: string): Promise<{ jobId: string; postId: string }> {
+  async regenerateImage(postId: string, body: unknown): Promise<{ jobId: string; postId: string }> {
     const post = await this.requirePost(postId);
     if (!post.text.trim()) throw new BadRequestException("нет текста поста");
     await this.ensureIdle(postId);
     await this.ensureAi();
-    return this.launch(post.id, "image");
+    return this.launch(post.id, "image", parseImageSeed(body));
+  }
+
+  async cancel(jobId: string): Promise<{ jobId: string; status: "cancelled" }> {
+    const job = await this.prisma.generationJob.findUnique({ where: { id: jobId } });
+    if (!job) throw new NotFoundException("джоба не найдена");
+    if (job.status !== "running") throw new ConflictException("генерация уже завершена");
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      try {
+        await this.python.cancelPipeline(jobId);
+        return { jobId, status: "cancelled" };
+      } catch (error) {
+        if (!(error instanceof PythonRequestError) || error.statusCode !== 404) {
+          const message = error instanceof Error ? error.message : "не удалось отменить";
+          throw new BadGatewayException(message);
+        }
+        const current = await this.prisma.generationJob.findUnique({ where: { id: jobId } });
+        if (!current || current.status !== "running") {
+          throw new ConflictException("генерация уже завершена");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    }
+    throw new BadGatewayException("не удалось отменить генерацию");
+  }
+
+  async gpuStatus() {
+    try {
+      return await this.python.gpuStatus();
+    } catch (error) {
+      if (error instanceof PythonRequestError) throw new BadGatewayException(error.message);
+      throw error;
+    }
   }
 
   async events(id: string, res: Response): Promise<void> {
@@ -84,6 +116,8 @@ export class GenerateService {
     if (!this.hub.has(id)) {
       if (job.status === "succeeded") {
         write({ event: "status", data: { phase: "done", job_id: id } });
+      } else if (job.status === "cancelled") {
+        write({ event: "cancelled", data: { message: job.error ?? "отменено" } });
       } else {
         write({ event: "error", data: { message: job.error ?? "джоба прервана" } });
       }
@@ -94,8 +128,11 @@ export class GenerateService {
     res.on("close", unsubscribe);
   }
 
-  private async launch(postId: string, kind: "full" | "text" | "image") {
+  private readonly imageSeeds = new Map<string, number>();
+
+  private async launch(postId: string, kind: "full" | "text" | "image", imageSeed?: number) {
     const jobId = randomUUID();
+    if (imageSeed !== undefined) this.imageSeeds.set(jobId, imageSeed);
     await this.prisma.generationJob.create({
       data: { id: jobId, postId, kind, status: "running" },
     });
@@ -114,6 +151,7 @@ export class GenerateService {
         await this.failOnce(jobId, message);
       }
     } finally {
+      this.imageSeeds.delete(jobId);
       this.hub.close(jobId);
     }
   }
@@ -135,9 +173,17 @@ export class GenerateService {
     };
     await this.python.stream(
       streamPath(job.kind),
-      job.kind === "image" ? imageBody(job.post, jobId) : postBody(job.post, jobId, preset),
+      job.kind === "image"
+        ? imageBody(job.post, jobId, this.imageSeeds.get(jobId))
+        : postBody(job.post, jobId, preset),
       async (event) => {
         if (finished) return;
+        if (event.event === "cancelled") {
+          if (finished) return;
+          finished = true;
+          await this.cancelOnce(jobId, messageOf(event.data));
+          return;
+        }
         if (event.event === "error") {
           await fail(messageOf(event.data));
           return;
@@ -155,7 +201,13 @@ export class GenerateService {
           if (job.kind === "text") {
             finished = true;
             const ready = { ...updated, status: "ready" };
-            await this.files.writeText(ready);
+            try {
+              await this.files.writeText(ready);
+            } catch (error) {
+              this.logger.error(`job ${jobId}: ${error instanceof Error ? error.message : "storage"}`);
+              await this.failOnce(jobId, STORAGE_WRITE_ERROR);
+              return;
+            }
             await this.markReady(jobId, job.postId);
           }
           this.hub.publish(jobId, event);
@@ -184,9 +236,16 @@ export class GenerateService {
             imagePrompt: prompt || current.imagePrompt,
           };
           finished = true;
-          const png = await this.readPng(jobId);
-          if (job.kind === "full") await this.files.writeAll(ready, png);
-          else await this.files.writeImage(ready, png);
+          let png: Buffer;
+          try {
+            png = await this.readPng(jobId);
+            if (job.kind === "full") await this.files.writeAll(ready, png);
+            else await this.files.writeImage(ready, png);
+          } catch (error) {
+            this.logger.error(`job ${jobId}: ${error instanceof Error ? error.message : "storage"}`);
+            await this.failOnce(jobId, STORAGE_WRITE_ERROR);
+            return;
+          }
           await this.prisma.post.update({
             where: { id: current.id },
             data: {
@@ -229,6 +288,21 @@ export class GenerateService {
       await this.prisma.post.update({ where: { id: post.id }, data: { status: "failed" } });
     }
     this.hub.publish(jobId, { event: "error", data: { message } });
+  }
+
+  private async cancelOnce(jobId: string, message: string): Promise<void> {
+    const job = await this.prisma.generationJob.findUnique({ where: { id: jobId } });
+    if (!job || job.status !== "running") return;
+    const text = message.trim() || "отменено";
+    await this.prisma.generationJob.update({
+      where: { id: jobId },
+      data: { status: "cancelled", error: text },
+    });
+    const post = await this.prisma.post.findUnique({ where: { id: job.postId } });
+    if (post?.status === "draft") {
+      await this.prisma.post.update({ where: { id: post.id }, data: { status: "failed" } });
+    }
+    this.hub.publish(jobId, { event: "cancelled", data: { message: text } });
   }
 
   private async createPost(input: GenerateInput): Promise<Post> {
@@ -361,7 +435,7 @@ function postBody(post: Post, jobId: string, preset: StylePreset | null): Record
   return body;
 }
 
-function imageBody(post: Post, jobId: string): Record<string, unknown> {
+function imageBody(post: Post, jobId: string, seed?: number): Record<string, unknown> {
   const body: Record<string, unknown> = {
     text: post.text,
     width: post.width,
@@ -370,7 +444,22 @@ function imageBody(post: Post, jobId: string): Record<string, unknown> {
     job_id: jobId,
   };
   if (post.temperature !== null) body.temperature = post.temperature;
+  if (seed !== undefined) body.seed = seed;
   return body;
+}
+
+const STORAGE_WRITE_ERROR = "Не удалось записать файлы поста.";
+
+function parseImageSeed(body: unknown): number | undefined {
+  if (body === undefined || body === null || body === "") return undefined;
+  if (!isRecord(body) || body.seed === undefined || body.seed === null) return undefined;
+  if (typeof body.seed !== "number" || !Number.isInteger(body.seed)) {
+    throw new BadRequestException("seed должен быть целым");
+  }
+  if (body.seed < 0 || body.seed > 2_147_483_647) {
+    throw new BadRequestException("seed вне диапазона 0..2147483647");
+  }
+  return body.seed;
 }
 
 function textOf(data: unknown): string {

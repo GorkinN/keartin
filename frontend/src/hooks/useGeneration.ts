@@ -14,6 +14,9 @@ export function useGeneration(onPost: (post: Post) => void) {
   const [liveText, setLiveText] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ step: number; total: number } | null>(null);
   const [running, setRunning] = useState<GenerationKind | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refreshPost = useCallback(
@@ -33,6 +36,8 @@ export function useGeneration(onPost: (post: Post) => void) {
   const run = useCallback(
     async (kind: GenerationKind, path: string, body?: unknown) => {
       setError(null);
+      setNotice(null);
+      setCancelling(false);
       setRunning(kind);
       if (kind !== "image") setLiveText("");
       setProgress(kind === "image" ? { step: 0, total: 0 } : null);
@@ -41,6 +46,7 @@ export function useGeneration(onPost: (post: Post) => void) {
           method: "POST",
           body: body === undefined ? undefined : JSON.stringify(body),
         });
+        setJobId(started.jobId);
         start(started.jobId, kind === "text" ? "text" : "image", {
           onToken: (chunk) => {
             if (kind === "image") return;
@@ -53,18 +59,32 @@ export function useGeneration(onPost: (post: Post) => void) {
           onImageProgress: (step, total) => setProgress({ step, total }),
           onError: (message) => {
             setError(message);
+            setCancelling(false);
             setRunning(null);
+            setJobId(null);
+            setProgress(null);
+            void refreshPost(started.postId);
+          },
+          onCancelled: () => {
+            setNotice("Отменено");
+            setCancelling(false);
+            setRunning(null);
+            setJobId(null);
             setProgress(null);
             void refreshPost(started.postId);
           },
           onDone: () => {
+            setCancelling(false);
             setRunning(null);
+            setJobId(null);
             setProgress(null);
             void refreshPost(started.postId);
           },
         });
       } catch (caught) {
+        setCancelling(false);
         setRunning(null);
+        setJobId(null);
         setProgress(null);
         setError(errorMessage(caught));
       }
@@ -72,5 +92,17 @@ export function useGeneration(onPost: (post: Post) => void) {
     [refreshPost, start],
   );
 
-  return { liveText, progress, running, error, run };
+  const cancel = useCallback(async () => {
+    if (!jobId || cancelling) return;
+    setCancelling(true);
+    setError(null);
+    try {
+      await api(`/generate/posts/${jobId}/cancel`, { method: "POST" });
+    } catch (caught) {
+      setCancelling(false);
+      setError(errorMessage(caught));
+    }
+  }, [cancelling, jobId]);
+
+  return { liveText, progress, running, jobId, cancelling, notice, error, run, cancel };
 }

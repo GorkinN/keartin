@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
+import { gpuBusyLabel, parseSeed } from "@/api/seed";
 import { knowledgeLabel, lengthLabel } from "@/api/labels";
 import { IMAGE_STEPS, resolveSize, SIZE_PRESETS, type SizePresetId } from "@/api/sizes";
-import type { Book, KnowledgeMode, Post, PostLength, Preset } from "@/api/types";
+import type { Book, GpuStatus, KnowledgeMode, Post, PostLength, Preset } from "@/api/types";
 import { ErrorText } from "@/components/error-text";
 import { PostPreview } from "@/components/post-preview";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ export function CreatePage() {
   const [sizePreset, setSizePreset] = useState<SizePresetId>("square");
   const [customWidth, setCustomWidth] = useState("1024");
   const [customHeight, setCustomHeight] = useState("1024");
+  const [seedText, setSeedText] = useState("");
   const [post, setPost] = useState<Post | null>(null);
   const generation = useGeneration(setPost);
 
@@ -46,16 +48,23 @@ export function CreatePage() {
     queryKey: ["presets"],
     queryFn: () => api<Preset[]>("/presets"),
   });
+  const gpu = useQuery({
+    queryKey: ["gpu-status"],
+    queryFn: () => api<GpuStatus>("/gpu/status"),
+    refetchInterval: 2000,
+  });
 
   const readyBooks = (books.data ?? []).filter((book) => book.status === "ready");
   const size = resolveSize(sizePreset, customWidth, customHeight);
   const sizeError = "error" in size ? size.error : null;
+  const seed = parseSeed(seedText);
+  const gpuLabel = gpuBusyLabel(gpu.data);
   const formReason = !topic.trim()
     ? "Нужна тема"
     : knowledgeMode === "rag" && bookIds.length === 0
       ? "Для режима «только книги» выберите хотя бы одну готовую книгу"
       : null;
-  const blocked = Boolean(formReason) || Boolean(sizeError);
+  const blocked = Boolean(formReason) || Boolean(sizeError) || Boolean(seed.error);
 
   const toggleBook = (id: string) => {
     setBookIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
@@ -77,6 +86,7 @@ export function CreatePage() {
       width: size.width,
       height: size.height,
       steps: IMAGE_STEPS,
+      ...(seed.value !== undefined ? { seed: seed.value } : {}),
     });
   };
 
@@ -203,8 +213,24 @@ export function CreatePage() {
               ) : null}
               {sizePreset === "custom" ? <ErrorText message={sizeError} /> : null}
             </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="seed">Seed картинки</Label>
+              <Input
+                id="seed"
+                inputMode="numeric"
+                placeholder="пусто — случайный"
+                value={seedText}
+                onChange={(event) => setSeedText(event.target.value)}
+              />
+              <ErrorText message={seed.error} />
+            </div>
             {formReason ? <p className="text-sm text-muted-foreground">{formReason}</p> : null}
-            <Button type="button" onClick={generate} disabled={blocked || generation.running !== null}>
+            {gpuLabel ? <p className="text-sm text-muted-foreground">{gpuLabel}</p> : null}
+            <Button
+              type="button"
+              onClick={generate}
+              disabled={blocked || generation.running !== null || Boolean(gpuLabel)}
+            >
               {generation.running === "full" ? "Генерация…" : "Сгенерировать"}
             </Button>
           </div>
@@ -217,6 +243,10 @@ export function CreatePage() {
           progress={generation.progress}
           running={generation.running}
           error={generation.error}
+          notice={generation.notice}
+          gpuLabel={gpuLabel}
+          cancelling={generation.cancelling}
+          onCancel={() => void generation.cancel()}
           onRegenerateText={
             post
               ? () => void generation.run("text", `/posts/${post.id}/regenerate-text`)
@@ -224,7 +254,8 @@ export function CreatePage() {
           }
           onRegenerateImage={
             post
-              ? () => void generation.run("image", `/posts/${post.id}/regenerate-image`)
+              ? (nextSeed) =>
+                  void generation.run("image", `/posts/${post.id}/regenerate-image`, nextSeed === undefined ? {} : { seed: nextSeed })
               : undefined
           }
         />

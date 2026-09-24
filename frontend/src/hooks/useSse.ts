@@ -7,6 +7,7 @@ export type SseCallbacks = {
   onText: (text: string) => void;
   onImageProgress: (step: number, total: number) => void;
   onError: (message: string) => void;
+  onCancelled: (message: string) => void;
   onDone: () => void;
 };
 
@@ -71,6 +72,15 @@ export function useSse() {
       source.addEventListener("status", (event) => {
         const data = readData(event);
         if (data?.phase === "done") succeed();
+      });
+
+      source.addEventListener("cancelled", (event) => {
+        if (settled) return;
+        settled = true;
+        close();
+        const data = readData(event);
+        const message = typeof data?.message === "string" ? data.message : "отменено";
+        callbacks.onCancelled(message);
       });
 
       source.addEventListener("error", (event) => {

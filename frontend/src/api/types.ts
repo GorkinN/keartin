@@ -58,6 +58,13 @@ export type Preset = {
   updatedAt: string;
 };
 
+export type GpuStatus = {
+  locked: boolean;
+  tenant: string | null;
+  ollama_models: string[];
+  vram_used_mb: number | null;
+};
+
 export type JobStart = {
   jobId: string;
   postId: string;

@@ -1,6 +1,10 @@
 # GPU
 
-Факт после этапа 2 (принят 2026-09-21). Владелец GPU — процесс FastAPI. Один `GpuManager`, один `asyncio.Lock`. Тенанты: `llm` | `flux`. Не `taskkill` Ollama. Flux не в Docker и не через ComfyUI.
+Факт после этапа 7 (2026-09-24, ждёт приёмки). Владелец GPU — процесс FastAPI. Один `GpuManager`, один `asyncio.Lock`. Тенанты: `llm` | `flux`. Не `taskkill` Ollama. Flux не в Docker и не через ComfyUI.
+
+`GET /gpu/status` (FastAPI и тот же путь на Nest): `locked`, `tenant`, `ollama_models`, `vram_used_mb`. Второй generate не получает `409`: он ждёт этот lock, два Flux сразу не стартуют. UI опрашивает Nest раз в 2 с и выключает кнопки, пока `locked`, с подписью «GPU занят: llm» или «GPU занят: flux».
+
+Отмена джобы не прерывает CUDA-шаг. Если Flux уже в `generate`, текущий прогон дочитывается, PNG в пост не сохраняется, затем `release` в `finally` выгружает модель как обычно.
 
 ## Порог VRAM
 

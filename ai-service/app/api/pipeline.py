@@ -1,21 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field, field_validator
 
 from app.gpu.manager import GpuManager
 from app.image.flux_pipeline import FluxPipelineHolder
 from app.llm.ollama_client import OllamaClient
+from app.pipeline.cancel import CancelRegistry
 from app.pipeline.post_pipeline import (
     JOB_ID_RE,
     ImageSpec,
     PostSpec,
     iter_image_events,
     iter_post_events,
+    resolve_job_id,
 )
 from app.rag.retriever import Retriever
 from app.settings import get_settings
@@ -191,18 +194,37 @@ def _retriever(request: Request) -> Retriever:
     return request.app.state.retriever
 
 
+def _cancels(request: Request) -> CancelRegistry:
+    return request.app.state.cancels
+
+
+def _opened_post(body: PostPipelineRequest, request: Request) -> PostSpec:
+    spec = replace(body.to_spec(), job_id=resolve_job_id(body.job_id))
+    _cancels(request).open(spec.job_id or "")
+    return spec
+
+
+@router.post("/jobs/{job_id}/cancel", status_code=202)
+async def cancel_pipeline_job(job_id: str, request: Request) -> dict[str, str]:
+    if not JOB_ID_RE.fullmatch(job_id) or not _cancels(request).cancel(job_id):
+        raise HTTPException(status_code=404, detail="джоба не найдена")
+    return {"jobId": job_id, "status": "cancelled"}
+
+
 @router.post("/stream", response_class=EventSourceResponse)
 async def pipeline_stream(
     body: PostPipelineRequest,
     request: Request,
 ) -> AsyncIterator[ServerSentEvent]:
+    spec = _opened_post(body, request)
     async for event in iter_post_events(
-        body.to_spec(),
+        spec,
         gpu=_gpu(request),
         retriever=_retriever(request),
         flux=_flux(request),
         client=OllamaClient(get_settings()),
         include_image=True,
+        cancels=_cancels(request),
     ):
         yield event
 
@@ -212,13 +234,15 @@ async def pipeline_text_stream(
     body: PostPipelineRequest,
     request: Request,
 ) -> AsyncIterator[ServerSentEvent]:
+    spec = _opened_post(body, request)
     async for event in iter_post_events(
-        body.to_spec(),
+        spec,
         gpu=_gpu(request),
         retriever=_retriever(request),
         flux=_flux(request),
         client=OllamaClient(get_settings()),
         include_image=False,
+        cancels=_cancels(request),
     ):
         yield event
 
@@ -228,10 +252,13 @@ async def pipeline_image_stream(
     body: ImagePipelineRequest,
     request: Request,
 ) -> AsyncIterator[ServerSentEvent]:
+    spec = replace(body.to_spec(), job_id=resolve_job_id(body.job_id))
+    _cancels(request).open(spec.job_id or "")
     async for event in iter_image_events(
-        body.to_spec(),
+        spec,
         gpu=_gpu(request),
         flux=_flux(request),
         client=OllamaClient(get_settings()),
+        cancels=_cancels(request),
     ):
         yield event

@@ -4,6 +4,7 @@ import asyncio
 import logging
 import random
 import re
+import threading
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -15,7 +16,9 @@ from app.bootstrap import repo_root
 from app.gpu.errors import GpuError
 from app.gpu.manager import GpuManager
 from app.image.flux_pipeline import FluxError, FluxPipelineHolder
-from app.llm.ollama_client import OllamaClient, OllamaError
+from app.llm.ollama_client import GenerationCancelled, OllamaClient, OllamaError
+from app.messages import CANCELLED, EMPTY_RAG, public_message
+from app.pipeline.cancel import CancelRegistry
 from app.prompts import load_image_system_prompt, load_post_system_prompt
 from app.rag.qdrant_store import SearchHit
 from app.rag.retriever import Retriever
@@ -28,7 +31,7 @@ DEFAULT_TONE = "живой, разговорный"
 DEFAULT_WIDTH = 1024
 DEFAULT_HEIGHT = 1024
 DEFAULT_STEPS = 28
-INSUFFICIENT_CONTEXT = "недостаточно контекста"
+INSUFFICIENT_CONTEXT = EMPTY_RAG
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,80}$")
 
 
@@ -204,73 +207,100 @@ async def iter_post_events(
     flux: FluxPipelineHolder,
     client: OllamaClient,
     include_image: bool,
+    cancels: CancelRegistry,
 ) -> AsyncIterator[ServerSentEvent]:
     job_id = resolve_job_id(spec.job_id)
-    yield _status("start", job_id)
+    stop = cancels.open(job_id)
     try:
-        await gpu.acquire("llm")
-    except GpuError as exc:
-        yield _error(str(exc))
-        return
-
-    image_prompt = ""
-    try:
-        if spec.knowledge_mode != "general":
-            yield _status("retrieve", job_id)
-        hits = await retrieve_hits(spec, retriever)
-        yield _status("text", job_id)
-        messages = build_post_messages(spec, hits)
-        parts: list[str] = []
-        async for token in client.chat_stream(
-            messages=messages,
-            temperature=spec.temperature,
-        ):
-            parts.append(token)
-            yield ServerSentEvent(data={"text": token}, event="token")
-        text = "".join(parts).strip()
-        if not text:
-            raise PipelineError("пустой текст поста")
-        write_post(job_id, text)
-        yield ServerSentEvent(
-            data={"text": text, "sources": _sources(hits)},
-            event="text_done",
-        )
-        if not include_image:
+        yield _status("start", job_id)
+        if _stopped(stop):
+            yield _cancelled()
             return
-        yield _status("image_prompt", job_id)
-        image_prompt = await _image_prompt_from_llm(client, text, spec.temperature)
-        write_image_prompt(job_id, image_prompt)
-        yield ServerSentEvent(data={"prompt": image_prompt}, event="image_prompt")
-    except PipelineError as exc:
-        yield _error(str(exc))
-        return
-    except (OllamaError, GpuError) as exc:
-        yield _error(str(exc))
-        return
-    except Exception as exc:
-        logger.exception("pipeline text failed job=%s", job_id)
-        yield _error(str(exc))
-        return
-    finally:
         try:
-            await gpu.release()
+            await gpu.acquire("llm")
+        except GpuError as exc:
+            yield _error(public_message(exc))
+            return
+
+        image_prompt = ""
+        try:
+            if spec.knowledge_mode != "general":
+                yield _status("retrieve", job_id)
+            if _stopped(stop):
+                yield _cancelled()
+                return
+            hits = await retrieve_hits(spec, retriever)
+            yield _status("text", job_id)
+            messages = build_post_messages(spec, hits)
+            parts: list[str] = []
+            async for token in client.chat_stream(
+                messages=messages,
+                temperature=spec.temperature,
+                stop=stop,
+            ):
+                parts.append(token)
+                yield ServerSentEvent(data={"text": token}, event="token")
+            if _stopped(stop):
+                yield _cancelled()
+                return
+            text = "".join(parts).strip()
+            if not text:
+                raise PipelineError("пустой текст поста")
+            write_post(job_id, text)
+            yield ServerSentEvent(
+                data={"text": text, "sources": _sources(hits)},
+                event="text_done",
+            )
+            if not include_image:
+                return
+            if _stopped(stop):
+                yield _cancelled()
+                return
+            yield _status("image_prompt", job_id)
+            image_prompt = await _image_prompt_from_llm(client, text, spec.temperature, stop=stop)
+            if _stopped(stop):
+                yield _cancelled()
+                return
+            write_image_prompt(job_id, image_prompt)
+            yield ServerSentEvent(data={"prompt": image_prompt}, event="image_prompt")
+        except GenerationCancelled:
+            yield _cancelled()
+            return
+        except PipelineError as exc:
+            yield _error(public_message(exc))
+            return
+        except (OllamaError, GpuError) as exc:
+            yield _error(public_message(exc))
+            return
         except Exception as exc:
-            logger.warning("gpu release after pipeline text failed: %s", exc)
+            logger.exception("pipeline text failed job=%s", job_id, extra={"job_id": job_id})
+            yield _error(public_message(exc))
+            return
+        finally:
+            try:
+                await gpu.release()
+            except Exception as exc:
+                logger.warning("gpu release after pipeline text failed: %s", exc, extra={"job_id": job_id})
 
-    if not image_prompt:
-        return
+        if not image_prompt or _stopped(stop):
+            if _stopped(stop):
+                yield _cancelled()
+            return
 
-    async for event in _iter_flux_phase(
-        flux,
-        gpu,
-        job_id=job_id,
-        prompt=image_prompt,
-        width=spec.width,
-        height=spec.height,
-        steps=spec.steps,
-        seed=spec.seed,
-    ):
-        yield event
+        async for event in _iter_flux_phase(
+            flux,
+            gpu,
+            job_id=job_id,
+            prompt=image_prompt,
+            width=spec.width,
+            height=spec.height,
+            steps=spec.steps,
+            seed=spec.seed,
+            stop=stop,
+        ):
+            yield event
+    finally:
+        cancels.close(job_id)
 
 
 async def iter_image_events(
@@ -279,61 +309,87 @@ async def iter_image_events(
     gpu: GpuManager,
     flux: FluxPipelineHolder,
     client: OllamaClient,
+    cancels: CancelRegistry,
 ) -> AsyncIterator[ServerSentEvent]:
     job_id = resolve_job_id(spec.job_id)
-    yield _status("start", job_id)
+    stop = cancels.open(job_id)
     try:
-        await gpu.acquire("llm")
-    except GpuError as exc:
-        yield _error(str(exc))
-        return
-
-    image_prompt = ""
-    try:
-        yield _status("image_prompt", job_id)
-        image_prompt = await _image_prompt_from_llm(client, spec.text, spec.temperature)
-        write_image_prompt(job_id, image_prompt)
-        yield ServerSentEvent(data={"prompt": image_prompt}, event="image_prompt")
-    except PipelineError as exc:
-        yield _error(str(exc))
-        return
-    except (OllamaError, GpuError) as exc:
-        yield _error(str(exc))
-        return
-    except Exception as exc:
-        logger.exception("pipeline image prompt failed job=%s", job_id)
-        yield _error(str(exc))
-        return
-    finally:
+        yield _status("start", job_id)
+        if _stopped(stop):
+            yield _cancelled()
+            return
         try:
-            await gpu.release()
+            await gpu.acquire("llm")
+        except GpuError as exc:
+            yield _error(public_message(exc))
+            return
+
+        image_prompt = ""
+        try:
+            if _stopped(stop):
+                yield _cancelled()
+                return
+            yield _status("image_prompt", job_id)
+            image_prompt = await _image_prompt_from_llm(client, spec.text, spec.temperature, stop=stop)
+            if _stopped(stop):
+                yield _cancelled()
+                return
+            write_image_prompt(job_id, image_prompt)
+            yield ServerSentEvent(data={"prompt": image_prompt}, event="image_prompt")
+        except GenerationCancelled:
+            yield _cancelled()
+            return
+        except PipelineError as exc:
+            yield _error(public_message(exc))
+            return
+        except (OllamaError, GpuError) as exc:
+            yield _error(public_message(exc))
+            return
         except Exception as exc:
-            logger.warning("gpu release after pipeline image prompt failed: %s", exc)
+            logger.exception("pipeline image prompt failed job=%s", job_id, extra={"job_id": job_id})
+            yield _error(public_message(exc))
+            return
+        finally:
+            try:
+                await gpu.release()
+            except Exception as exc:
+                logger.warning(
+                    "gpu release after pipeline image prompt failed: %s",
+                    exc,
+                    extra={"job_id": job_id},
+                )
 
-    if not image_prompt:
-        return
+        if not image_prompt or _stopped(stop):
+            if _stopped(stop):
+                yield _cancelled()
+            return
 
-    async for event in _iter_flux_phase(
-        flux,
-        gpu,
-        job_id=job_id,
-        prompt=image_prompt,
-        width=spec.width,
-        height=spec.height,
-        steps=spec.steps,
-        seed=spec.seed,
-    ):
-        yield event
+        async for event in _iter_flux_phase(
+            flux,
+            gpu,
+            job_id=job_id,
+            prompt=image_prompt,
+            width=spec.width,
+            height=spec.height,
+            steps=spec.steps,
+            seed=spec.seed,
+            stop=stop,
+        ):
+            yield event
+    finally:
+        cancels.close(job_id)
 
 
 async def _image_prompt_from_llm(
     client: OllamaClient,
     post_text: str,
     temperature: float | None,
+    stop: threading.Event | None = None,
 ) -> str:
     raw = await client.chat(
         messages=build_image_messages(post_text),
         temperature=temperature,
+        stop=stop,
     )
     prompt = clean_image_prompt(raw)
     if not prompt:
@@ -351,15 +407,23 @@ async def _iter_flux_phase(
     height: int,
     steps: int,
     seed: int | None,
+    stop: threading.Event,
 ) -> AsyncIterator[ServerSentEvent]:
+    if _stopped(stop):
+        yield _cancelled()
+        return
     resolved_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
     try:
         await gpu.acquire("flux")
     except GpuError as exc:
-        yield _error(str(exc))
+        yield _error(public_message(exc))
         return
     try:
-        logger.info("pipeline job=%s gpu_unload_llm done, flux tenant held", job_id)
+        logger.info(
+            "pipeline job=%s gpu_unload_llm done, flux tenant held",
+            job_id,
+            extra={"job_id": job_id},
+        )
         yield ServerSentEvent(data={"ok": True}, event="gpu_unload_llm")
         yield _status("load_flux", job_id)
         await asyncio.to_thread(flux.load)
@@ -372,19 +436,20 @@ async def _iter_flux_phase(
             steps=steps,
             seed=resolved_seed,
             job_id=job_id,
+            stop=stop,
         ):
             yield event
         yield _status("unload_flux", job_id)
     except (GpuError, FluxError, PipelineError) as exc:
-        yield _error(str(exc))
+        yield _error(public_message(exc))
     except Exception as exc:
-        logger.exception("pipeline flux failed job=%s", job_id)
-        yield _error(str(exc))
+        logger.exception("pipeline flux failed job=%s", job_id, extra={"job_id": job_id})
+        yield _error(public_message(exc))
     finally:
         try:
             await gpu.release()
         except Exception as exc:
-            logger.warning("gpu release after pipeline flux failed: %s", exc)
+            logger.warning("gpu release after pipeline flux failed: %s", exc, extra={"job_id": job_id})
 
 
 async def _iter_flux_generate(
@@ -396,6 +461,7 @@ async def _iter_flux_generate(
     steps: int,
     seed: int,
     job_id: str,
+    stop: threading.Event,
 ) -> AsyncIterator[ServerSentEvent]:
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[tuple[str, object, object | None]] = asyncio.Queue()
@@ -413,6 +479,9 @@ async def _iter_flux_generate(
                 seed=seed,
                 on_step=on_step,
             )
+            if stop.is_set():
+                loop.call_soon_threadsafe(queue.put_nowait, ("cancelled", None, None))
+                return
             path = save_png(job_id, image)
             loop.call_soon_threadsafe(queue.put_nowait, ("done", str(path), None))
         except Exception as exc:
@@ -433,18 +502,30 @@ async def _iter_flux_generate(
                 event="image_done",
             )
             return
+        elif kind == "cancelled":
+            await future
+            yield _cancelled()
+            return
         else:
             await future
             raise first  # type: ignore[misc]
 
 
 def _status(phase: str, job_id: str) -> ServerSentEvent:
-    logger.info("pipeline job=%s phase=%s", job_id, phase)
+    logger.info("pipeline job=%s phase=%s", job_id, phase, extra={"job_id": job_id})
     return ServerSentEvent(data={"phase": phase, "job_id": job_id}, event="status")
 
 
 def _error(message: str) -> ServerSentEvent:
     return ServerSentEvent(data={"message": message}, event="error")
+
+
+def _cancelled() -> ServerSentEvent:
+    return ServerSentEvent(data={"message": CANCELLED}, event="cancelled")
+
+
+def _stopped(stop: threading.Event) -> bool:
+    return stop.is_set()
 
 
 def _sources(hits: list[SearchHit]) -> list[dict[str, object]]:

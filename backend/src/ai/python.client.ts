@@ -17,6 +17,13 @@ export type IndexAccepted = {
   status: string;
 };
 
+export type GpuStatus = {
+  locked: boolean;
+  tenant: string | null;
+  ollama_models: string[];
+  vram_used_mb: number | null;
+};
+
 export type IndexStatus = {
   job_id: string;
   book_id: string;
@@ -62,6 +69,17 @@ export class PythonClient {
       throw new PythonRequestError(await readError(response), response.status);
     }
     return (await response.json()) as IndexStatus;
+  }
+
+  async gpuStatus(): Promise<GpuStatus> {
+    return this.json<GpuStatus>("/gpu/status", { method: "GET", timeoutMs: 10_000 });
+  }
+
+  async cancelPipeline(jobId: string): Promise<void> {
+    await this.json(`/pipeline/jobs/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST",
+      timeoutMs: 10_000,
+    });
   }
 
   async deleteBook(bookId: string): Promise<void> {

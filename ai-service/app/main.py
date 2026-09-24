@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 
+from app.logging_json import configure_logging
+from app.pipeline.cancel import CancelRegistry
 from app.api.generate import router as generate_router
 from app.api.gpu import router as gpu_router
 from app.api.health import router as health_router
@@ -14,6 +16,7 @@ from app.rag.qdrant_store import QdrantStore
 from app.rag.retriever import Retriever
 from app.settings import get_settings
 
+configure_logging()
 settings = get_settings()
 gpu = GpuManager(settings)
 flux = FluxPipelineHolder(settings)
@@ -32,6 +35,7 @@ app.state.qdrant = qdrant
 app.state.rag_jobs = rag_jobs
 app.state.indexer = indexer
 app.state.retriever = retriever
+app.state.cancels = CancelRegistry()
 app.state.rag_tasks = set()
 app.include_router(health_router)
 app.include_router(gpu_router)

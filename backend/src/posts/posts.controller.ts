@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Header, HttpCode, Param, Post, StreamableFile } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Header, HttpCode, Param, Post, StreamableFile } from "@nestjs/common";
 import { GenerateService } from "../generate/generate.service";
 import { PostsService } from "./posts.service";
 
@@ -45,7 +45,7 @@ export class PostsController {
 
   @Post(":id/regenerate-image")
   @HttpCode(202)
-  regenerateImage(@Param("id") id: string) {
-    return this.generate.regenerateImage(id);
+  regenerateImage(@Param("id") id: string, @Body() body: unknown) {
+    return this.generate.regenerateImage(id, body);
   }
 }

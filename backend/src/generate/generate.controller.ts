@@ -16,4 +16,10 @@ export class GenerateController {
   events(@Param("id") id: string, @Res() res: Response) {
     return this.generate.events(id, res);
   }
+
+  @Post("posts/:id/cancel")
+  @HttpCode(202)
+  cancel(@Param("id") id: string) {
+    return this.generate.cancel(id);
+  }
 }

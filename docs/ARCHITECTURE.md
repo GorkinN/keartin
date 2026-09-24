@@ -1,6 +1,6 @@
 # Архитектура
 
-После **этапа 6** (выполнен, принят 2026-09-24). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
+После **этапа 7** (выполнен 2026-09-24, ждёт приёмки). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
 
 ## Принцип
 
@@ -8,7 +8,7 @@
 
 Прямой вызов UI → FastAPI запрещён. Продуктовый цикл — REST/SSE Nest `:3000`. FastAPI остаётся внутренним воркером.
 
-## Что есть после этапа 6
+## Что есть после этапа 7
 
 - Всё из этапов 0–5: health, Ollama text, Flux NF4 + GpuManager, Qdrant, RAG, pipeline, Nest API.
 - UI: библиотека, мастер поста, история, пресеты. Vite `:5173` проксирует Nest. Браузер в FastAPI не ходит. Авторизации и редактора поста нет.
@@ -19,7 +19,7 @@
 
 Префикса `/api` нет. JSON camelCase. `sources[]` в БД и `meta.json` тоже camelCase; в SSE остаются поля Python (`book_id`, `chunk_index`, `source_name`).
 
-Книга: `indexing | ready | error`. Джоба: `running | succeeded | failed`. Пост: `draft | ready | failed`. После рестарта Nest висящие джобы → `failed` («прервано перезапуском»), книги в `indexing` → `error`. Черновик поста при этом тоже `failed`.
+Книга: `indexing | ready | error`. Джоба: `running | succeeded | failed | cancelled`. Пост: `draft | ready | failed`. После рестарта Nest висящие джобы → `failed` («прервано перезапуском»), книги в `indexing` → `error`. Черновик поста при этом тоже `failed`.
 
 | Метод | Путь | Ответ |
 |--------|------|--------|
@@ -27,7 +27,7 @@
 | `GET` | `/library/books`, `/library/books/:id` | список / одна. Прогресс чанков Nest пишет сам, опрашивая Python |
 | `POST` | `/library/books/:id/reindex` | `202`. Пока статус `indexing` — `409` |
 | `DELETE` | `/library/books/:id` | векторы через Python, затем storage. Посты не удаляются. `indexing` → `409`. Python недоступен → `502`, книга остаётся |
-| `GET/POST/PATCH/DELETE` | `/presets` | `name`, `description`, `examples` (до 5). Удаление пресета обнуляет `presetId` у постов |
+| `GET/POST/PATCH/DELETE` | `/presets` | `name`, `description` (после trim не короче 10 символов), `examples` (до 5, необязательны). Пустое описание — `400`. Удаление пресета обнуляет `presetId` у постов |
 | `GET` | `/posts`, `/posts/:id` | список и карточка, новые сверху |
 | `GET` | `/posts/:id/image` | `image/png` по `imageKey` через StorageProvider. Пустой ключ или нет файла — `404` |
 | `DELETE` | `/posts/:id` | БД и папка. Во время генерации этого поста — `409` |
@@ -35,9 +35,13 @@
 | `POST` | `/generate/posts` | `202 { jobId, postId }`. Тело: `topic`, `tone`, `length` S/M/L, `emoji`, `knowledgeMode`, `citations`, `structure`, `bookIds`, `topK`, `presetId`, `temperature`, `width`, `height`, `steps`, `seed` |
 | `GET` | `/generate/posts/:id/events` | SSE, события Python как есть |
 | `POST` | `/posts/:id/regenerate-text` | новый job, тот же URL событий. Перезаписывает `post.md` / `post.txt`, картинку не трогает |
-| `POST` | `/posts/:id/regenerate-image` | то же для `image.png`, `image_prompt.txt` и seed. Seed в Python не передаётся, чтобы картинка была новой |
+| `POST` | `/posts/:id/regenerate-image` | тело `{ seed? }`. Нет `seed` — случайный. Число уходит в Python. Пишет `image.png`, `image_prompt.txt` и seed. Текст не трогает |
+| `POST` | `/generate/posts/:id/cancel` | `202 { jobId, status: "cancelled" }`. Джоба не `running` — `409`. Нет джобы — `404` |
+| `GET` | `/gpu/status` | прокси FastAPI: `{ locked, tenant, ollama_models, vram_used_mb }`. FastAPI недоступен — `502` |
 
-`rag` без книг или с книгой не в `ready` — `409` до вызова Python. Неизвестный пресет или книга — `404`. FastAPI недоступен до старта — `502`, строка поста не создаётся. «Недостаточно контекста», Ollama и GPU приходят событием `error`, джоба `failed`. Параллельный generate ждёт lock в Python; отдельный `409` на занятый GPU — этап 7.
+`rag` без книг или с книгой не в `ready` — `409` до вызова Python. Неизвестный пресет или книга — `404`. FastAPI недоступен до старта — `502`, строка поста не создаётся. Пустой RAG, Ollama и GPU приходят событием `error` уже по-русски, джоба `failed`. Запись файлов при сбое диска или MinIO — «Не удалось записать файлы поста.» Параллельный generate ждёт lock в Python. Отдельного `409` на занятый GPU нет: UI выключает кнопки, пока `locked`. На одном посте второй запуск по-прежнему `409`.
+
+Отмена не рвёт SSE Nest→Python. Nest зовёт `POST /pipeline/jobs/:id/cancel`. Во время текста httpx-стрим к Ollama закрывается, Flux не стартует. Если Flux уже считает, прогон доходит до конца, PNG в пост не пишется, событие `cancelled` `{ message: "отменено" }`. `gpu.release` остаётся в `finally`. Черновик, который ещё не `ready`, становится `failed`; уже готовый пост остаётся `ready`, старые файлы на месте. Если `text_done` уже записан в SQLite, текст в строке остаётся, папку поста отмена не создаёт.
 
 Успешный SSE сам записывает пост. `post.md` и `post.txt` — один текст. Папка `data/posts/YYYY-MM-DD_slug/` (транслит темы, при коллизии `-2`). Ключи в SQLite относительные (`posts/.../image.png`), одни и те же для fs и s3. `meta.json` дублирует поля поста. `models.llm` / `models.flux` берутся из `LLM_MODEL` и `FLUX_MODEL_ID`.
 
@@ -112,6 +116,8 @@ TRANSFORMERS_CACHE=D:/huggingface_cache/transformers
 
 Тело поста: `topic`, `tone` (пусто → «живой, разговорный»), `length` `S|M|L` (около 500 / 1200 / 2500 символов), `emoji` default false, `knowledge_mode` default `rag`, `citations` default false, `structure` `{hooks, body, cta}` default все true, `book_ids`, `top_k` default 10 (1–20), `preset` `{description, examples}` до 5 примеров. Картинка: `width` / `height` / `steps` / `seed`, дефолт 1024×1024 и 28 steps. `job_id` опционален (`[A-Za-z0-9-]{1,80}`).
 
-SSE: `status` (`start`, `retrieve`, `text`, `image_prompt`, `load_flux`, `generate`, `unload_flux`; в data есть `job_id`), `token` `{"text"}`, `text_done` `{"text","sources"}`, `image_prompt` `{"prompt"}`, `gpu_unload_llm` `{"ok": true}`, `image_progress` `{"step","total"}`, `image_done` `{"path","seed","prompt"}`, `error` `{"message"}`.
+SSE: `status` (`start`, `retrieve`, `text`, `image_prompt`, `load_flux`, `generate`, `unload_flux`; в data есть `job_id`), `token` `{"text"}`, `text_done` `{"text","sources"}`, `image_prompt` `{"prompt"}`, `gpu_unload_llm` `{"ok": true}`, `image_progress` `{"step","total"}`, `image_done` `{"path","seed","prompt"}`, `cancelled` `{"message":"отменено"}`, `error` `{"message"}`.
 
-Режимы: `general` без retrieval. `rag` без `book_ids` или с 0 хитов — `error` «недостаточно контекста», LLM не вызывается. `rag_plus` с пустым поиском пишет по общим знаниям, без выдуманных цитат. Выключенный блок структуры в промпт не попадает. `citations: false` — в промпт не попадают `source_name`. Хиты режутся по score, пока текст контекста ≤ 10 000 символов. Flux получает одну английскую строку, без negative.
+Логи Python и Nest — JSON-строка в stdout: `ts`, `level`, `logger`, `msg`, у пайплайна ещё `job_id`.
+
+Режимы: `general` без retrieval. `rag` без `book_ids` или с 0 хитов — `error` «В выбранных книгах нет подходящих фрагментов.», LLM не вызывается. `rag_plus` с пустым поиском пишет по общим знаниям, без выдуманных цитат. Выключенный блок структуры в промпт не попадает. `citations: false` — в промпт не попадают `source_name`. Хиты режутся по score, пока текст контекста ≤ 10 000 символов. Flux получает одну английскую строку, без negative.

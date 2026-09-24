@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import threading
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
 from app.settings import Settings
+
+
+class GenerationCancelled(Exception):
+    """The pipeline cancel flag fired while Ollama was streaming."""
 
 
 class OllamaError(Exception):
@@ -45,6 +50,7 @@ class OllamaClient:
         messages: list[dict[str, str]],
         temperature: float | None = None,
         keep_alive: str | int | None = None,
+        stop: threading.Event | None = None,
     ) -> AsyncIterator[str]:
         payload: dict[str, Any] = {
             "model": self._model,
@@ -54,7 +60,7 @@ class OllamaClient:
             "options": self._options(temperature),
             "think": False,
         }
-        async for chunk in self._ndjson_stream("/api/chat", payload):
+        async for chunk in self._ndjson_stream("/api/chat", payload, stop=stop):
             message = chunk.get("message") or {}
             content = message.get("content") or ""
             if content:
@@ -89,12 +95,14 @@ class OllamaClient:
         messages: list[dict[str, str]],
         temperature: float | None = None,
         keep_alive: str | int | None = None,
+        stop: threading.Event | None = None,
     ) -> str:
         parts: list[str] = []
         async for token in self.chat_stream(
             messages=messages,
             temperature=temperature,
             keep_alive=keep_alive,
+            stop=stop,
         ):
             parts.append(token)
         return "".join(parts)
@@ -164,6 +172,7 @@ class OllamaClient:
         self,
         path: str,
         payload: dict[str, Any],
+        stop: threading.Event | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
         url = f"{self._host}{path}"
@@ -177,6 +186,8 @@ class OllamaClient:
                             status_code=_map_status(response.status_code),
                         )
                     async for line in response.aiter_lines():
+                        if stop is not None and stop.is_set():
+                            raise GenerationCancelled()
                         line = line.strip()
                         if not line:
                             continue

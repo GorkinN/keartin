@@ -45,10 +45,12 @@ export function PresetsPage() {
   const save = useMutation({
     mutationFn: async () => {
       const name = draft.name.trim();
+      const description = draft.description.trim();
       if (!name) throw new Error("Нужно имя пресета");
+      if (description.length < 10) throw new Error("описание пресета короче 10 символов");
       const payload = {
         name,
-        description: draft.description.trim(),
+        description,
         examples: draft.examples.map((item) => item.trim()).filter(Boolean),
       };
       if (editor?.mode === "edit") {
@@ -203,7 +205,11 @@ export function PresetsPage() {
             <Button type="button" variant="outline" onClick={() => setEditor(null)}>
               Отмена
             </Button>
-            <Button type="button" onClick={() => save.mutate()} disabled={save.isPending}>
+            <Button
+              type="button"
+              onClick={() => save.mutate()}
+              disabled={save.isPending || !draft.name.trim() || draft.description.trim().length < 10}
+            >
               {save.isPending ? "Сохранение…" : "Сохранить"}
             </Button>
           </DialogFooter>

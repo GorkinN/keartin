@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
+import { gpuBusyLabel } from "@/api/seed";
 import { formatWhen, postStatusLabel } from "@/api/labels";
-import type { Post } from "@/api/types";
+import type { GpuStatus, Post } from "@/api/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorText } from "@/components/error-text";
 import { PostPreview } from "@/components/post-preview";
@@ -53,6 +54,7 @@ export function HistoryDetailPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [folderMessage, setFolderMessage] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const postQuery = useQuery({
     queryKey: ["posts", id],
@@ -62,6 +64,12 @@ export function HistoryDetailPage() {
   const generation = useGeneration((next) => {
     queryClient.setQueryData(["posts", id], next);
   });
+  const gpu = useQuery({
+    queryKey: ["gpu-status"],
+    queryFn: () => api<GpuStatus>("/gpu/status"),
+    refetchInterval: 2000,
+  });
+  const gpuLabel = gpuBusyLabel(gpu.data);
 
   const openFolder = useMutation({
     mutationFn: () => api<{ ok: true }>(`/posts/${id}/open-folder`, { method: "POST" }),
@@ -96,7 +104,23 @@ export function HistoryDetailPage() {
             <p>
               {postStatusLabel(post.status)} · {formatWhen(post.createdAt)} · {post.width}×{post.height}
             </p>
-            <p>Seed: {post.imageSeed ?? "—"}</p>
+            <p className="flex items-center gap-2">
+              <span>Seed: {post.imageSeed ?? "—"}</span>
+              {post.imageSeed !== null ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(String(post.imageSeed)).then(() => {
+                      setCopied(true);
+                    });
+                  }}
+                >
+                  {copied ? "Скопировано" : "Копировать"}
+                </Button>
+              ) : null}
+            </p>
           </div>
           <PostPreview
             post={post}
@@ -104,9 +128,19 @@ export function HistoryDetailPage() {
             progress={generation.progress}
             running={generation.running}
             error={generation.error}
+            notice={generation.notice}
+            gpuLabel={gpuLabel}
+            cancelling={generation.cancelling}
+            onCancel={() => void generation.cancel()}
             showHistoryLink={false}
             onRegenerateText={() => void generation.run("text", `/posts/${post.id}/regenerate-text`)}
-            onRegenerateImage={() => void generation.run("image", `/posts/${post.id}/regenerate-image`)}
+            onRegenerateImage={(nextSeed) =>
+              void generation.run(
+                "image",
+                `/posts/${post.id}/regenerate-image`,
+                nextSeed === undefined ? {} : { seed: nextSeed },
+              )
+            }
           />
           {post.sources.length > 0 ? (
             <div className="space-y-1">

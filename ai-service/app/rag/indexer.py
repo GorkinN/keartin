@@ -4,6 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 
+from app.messages import public_message
 from app.rag.chunking import chunk_text, detect_lang
 from app.rag.embedder import Embedder
 from app.rag.errors import RagError
@@ -39,9 +40,9 @@ class Indexer:
                 logger.exception("index job %s failed", job.job_id)
                 job.status = "error"
                 if isinstance(exc, RagError):
-                    job.error = str(exc)
+                    job.error = public_message(exc)
                 else:
-                    job.error = f"Indexing failed: {exc}"
+                    job.error = public_message(RuntimeError(f"Indexing failed: {exc}"))
 
     async def _index_locked(self, job: IndexJob, path: Path) -> None:
         parsed = await asyncio.to_thread(parse_file, path)

@@ -96,11 +96,14 @@ function parsePreset(
     if (name.length > 120) throw new BadRequestException("имя пресета длиннее 120 символов");
     result.name = name;
   }
-  if (body.description !== undefined) {
+  if (body.description !== undefined || creating) {
     if (typeof body.description !== "string") {
-      throw new BadRequestException("description должен быть строкой");
+      throw new BadRequestException("описание пресета должно быть строкой");
     }
     const description = body.description.trim();
+    if (description.length < 10) {
+      throw new BadRequestException("описание пресета короче 10 символов");
+    }
     if (description.length > 4000) {
       throw new BadRequestException("описание пресета длиннее 4000 символов");
     }
