@@ -1,6 +1,6 @@
 # Архитектура
 
-После **этапа 6** (выполнен 2026-09-23, ждёт приёмки). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
+После **этапа 6** (выполнен, принят 2026-09-24). Источник: [plan/01-architecture.md](plan/01-architecture.md). Уточняется каждый этап. GPU: [GPU.md](GPU.md). RAG: [RAG.md](RAG.md).
 
 ## Принцип
 

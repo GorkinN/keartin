@@ -37,4 +37,4 @@
 
 ## Текущий шаг
 
-Этап 6 выполнен (2026-09-23), отчёт в [stages/06-frontend.md](stages/06-frontend.md), ждёт приёмки. Следующий код — [этап 7](stages/07-polish.md) после OK.
+Этап 6 выполнен, принят (2026-09-24). Отчёт в [stages/06-frontend.md](stages/06-frontend.md). Следующий код — [этап 7](stages/07-polish.md) после OK.

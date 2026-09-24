@@ -22,7 +22,7 @@ todos:
     status: completed
   - id: stage-6
     content: "Этап 6: React UI — библиотека, генерация, история, пресеты"
-    status: pending
+    status: completed
   - id: stage-7
     content: "Этап 7: Полировка UX, ошибки, отмена job, документация"
     status: pending
