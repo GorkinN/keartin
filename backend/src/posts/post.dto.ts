@@ -13,6 +13,7 @@ export type PostDto = {
   bookIds: string[];
   topK: number;
   presetId: string | null;
+  imagePresetId: string | null;
   temperature: number | null;
   width: number;
   height: number;
@@ -44,6 +45,7 @@ export function toPostDto(post: Post, activeJobId: string | null): PostDto {
     bookIds: parseIdList(post.bookIds),
     topK: post.topK,
     presetId: post.presetId,
+    imagePresetId: post.imagePresetId,
     temperature: post.temperature,
     width: post.width,
     height: post.height,
@@ -78,6 +80,7 @@ export function postMeta(post: Post): string {
       bookIds: dto.bookIds,
       topK: dto.topK,
       presetId: dto.presetId,
+      imagePresetId: dto.imagePresetId,
       imageSeed: dto.imageSeed,
       models: dto.models,
       sources: dto.sources,

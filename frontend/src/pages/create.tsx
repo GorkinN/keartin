@@ -4,7 +4,7 @@ import { api, errorMessage } from "@/api/client";
 import { gpuBusyLabel, parseSeed } from "@/api/seed";
 import { knowledgeLabel, lengthLabel } from "@/api/labels";
 import { IMAGE_STEPS, resolveSize, SIZE_PRESETS, type SizePresetId } from "@/api/sizes";
-import type { Book, GpuStatus, KnowledgeMode, Post, PostLength, Preset } from "@/api/types";
+import type { Book, GpuStatus, ImagePromptPreset, KnowledgeMode, Post, PostLength, Preset } from "@/api/types";
 import { ErrorText } from "@/components/error-text";
 import { PostPreview } from "@/components/post-preview";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,7 @@ export function CreatePage() {
   const [cta, setCta] = useState(true);
   const [knowledgeMode, setKnowledgeMode] = useState<KnowledgeMode>("rag");
   const [presetId, setPresetId] = useState("none");
+  const [imagePresetId, setImagePresetId] = useState("none");
   const [sizePreset, setSizePreset] = useState<SizePresetId>("square");
   const [customWidth, setCustomWidth] = useState("1024");
   const [customHeight, setCustomHeight] = useState("1024");
@@ -47,6 +48,10 @@ export function CreatePage() {
   const presets = useQuery({
     queryKey: ["presets"],
     queryFn: () => api<Preset[]>("/presets"),
+  });
+  const imagePresets = useQuery({
+    queryKey: ["image-presets"],
+    queryFn: () => api<ImagePromptPreset[]>("/image-presets"),
   });
   const gpu = useQuery({
     queryKey: ["gpu-status"],
@@ -83,6 +88,7 @@ export function CreatePage() {
       structure: { hooks, body: includeBody, cta },
       bookIds: knowledgeMode === "general" ? [] : bookIds,
       presetId: presetId === "none" ? null : presetId,
+      imagePresetId: imagePresetId === "none" ? null : imagePresetId,
       width: size.width,
       height: size.height,
       steps: IMAGE_STEPS,
@@ -172,6 +178,18 @@ export function CreatePage() {
               </Select>
               {presets.isError ? <ErrorText message={errorMessage(presets.error)} /> : null}
             </div>
+            <div className="space-y-1.5">
+              <Label>Стиль картинки</Label>
+              <Select value={imagePresetId} onValueChange={setImagePresetId}>
+                <SelectItem value="none">Без стиля</SelectItem>
+                {(imagePresets.data ?? []).map((preset) => (
+                  <SelectItem key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </SelectItem>
+                ))}
+              </Select>
+              {imagePresets.isError ? <ErrorText message={errorMessage(imagePresets.error)} /> : null}
+            </div>
             <div className="space-y-3">
               <Toggle label="Эмодзи" checked={emoji} onCheckedChange={setEmoji} />
               <Toggle label="Цитируемость" checked={citations} onCheckedChange={setCitations} />
@@ -254,8 +272,11 @@ export function CreatePage() {
           }
           onRegenerateImage={
             post
-              ? (nextSeed) =>
-                  void generation.run("image", `/posts/${post.id}/regenerate-image`, nextSeed === undefined ? {} : { seed: nextSeed })
+              ? (nextSeed, nextImagePresetId) =>
+                  void generation.run("image", `/posts/${post.id}/regenerate-image`, {
+                    ...(nextSeed === undefined ? {} : { seed: nextSeed }),
+                    imagePresetId: nextImagePresetId ?? null,
+                  })
               : undefined
           }
         />

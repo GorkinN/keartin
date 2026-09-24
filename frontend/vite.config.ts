@@ -24,6 +24,7 @@ export default defineConfig({
       "/library": nestProxy,
       "/posts": nestProxy,
       "/presets": nestProxy,
+      "/image-presets": nestProxy,
       "/generate": nestProxy,
       "/gpu": nestProxy,
       "/health": nestProxy,

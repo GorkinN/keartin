@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
-import type { Preset } from "@/api/types";
+import type { ImagePromptPreset, Preset } from "@/api/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorText } from "@/components/error-text";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 type Draft = {
@@ -32,6 +33,26 @@ type Editor =
 const emptyDraft = (): Draft => ({ name: "", description: "", examples: [""] });
 
 export function PresetsPage() {
+  return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-semibold">Пресеты</h1>
+      <Tabs defaultValue="text">
+        <TabsList>
+          <TabsTrigger value="text">Текст</TabsTrigger>
+          <TabsTrigger value="image">Картинка</TabsTrigger>
+        </TabsList>
+        <TabsContent value="text">
+          <TextPresets />
+        </TabsContent>
+        <TabsContent value="image">
+          <ImagePresets />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function TextPresets() {
   const queryClient = useQueryClient();
   const [editor, setEditor] = useState<Editor>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
@@ -92,8 +113,7 @@ export function PresetsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <h1 className="text-2xl font-semibold">Пресеты</h1>
+      <div className="flex items-center justify-end gap-4">
         <Button type="button" onClick={openCreate}>
           Новый пресет
         </Button>
@@ -209,6 +229,163 @@ export function PresetsPage() {
               type="button"
               onClick={() => save.mutate()}
               disabled={save.isPending || !draft.name.trim() || draft.description.trim().length < 10}
+            >
+              {save.isPending ? "Сохранение…" : "Сохранить"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Удалить пресет?"
+        description={deleteTarget ? `«${deleteTarget.name}» будет удалён. У постов ссылка на него обнулится.` : ""}
+        confirmLabel="Удалить"
+        pending={remove.isPending}
+        error={remove.isError ? errorMessage(remove.error) : null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        onConfirm={() => {
+          if (deleteTarget) remove.mutate(deleteTarget.id);
+        }}
+      />
+    </div>
+  );
+}
+
+type ImageDraft = { name: string; prompt: string };
+type ImageEditor = { mode: "create" } | { mode: "edit"; id: string } | null;
+
+function ImagePresets() {
+  const queryClient = useQueryClient();
+  const [editor, setEditor] = useState<ImageEditor>(null);
+  const [draft, setDraft] = useState<ImageDraft>({ name: "", prompt: "" });
+  const [formError, setFormError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ImagePromptPreset | null>(null);
+  const presets = useQuery({
+    queryKey: ["image-presets"],
+    queryFn: () => api<ImagePromptPreset[]>("/image-presets"),
+  });
+
+  const save = useMutation({
+    mutationFn: async () => {
+      const name = draft.name.trim();
+      const prompt = draft.prompt.trim();
+      if (!name) throw new Error("Нужно имя пресета");
+      if (prompt.length < 10) throw new Error("промпт пресета короче 10 символов");
+      const payload = { name, prompt };
+      if (editor?.mode === "edit") {
+        return api<ImagePromptPreset>(`/image-presets/${editor.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      }
+      return api<ImagePromptPreset>("/image-presets", { method: "POST", body: JSON.stringify(payload) });
+    },
+    onSuccess: async () => {
+      setEditor(null);
+      setFormError(null);
+      await queryClient.invalidateQueries({ queryKey: ["image-presets"] });
+    },
+    onError: (error) => setFormError(errorMessage(error)),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api<{ ok: true }>(`/image-presets/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["image-presets"] });
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-end gap-4">
+        <Button
+          type="button"
+          onClick={() => {
+            setDraft({ name: "", prompt: "" });
+            setFormError(null);
+            setEditor({ mode: "create" });
+          }}
+        >
+          Новый пресет
+        </Button>
+      </div>
+      <ErrorText message={presets.isError ? errorMessage(presets.error) : null} />
+      {presets.isPending ? <p className="text-sm text-muted-foreground">Загрузка…</p> : null}
+      {presets.data && presets.data.length === 0 ? (
+        <Card>
+          <p className="text-sm text-muted-foreground">Пресетов картинки пока нет.</p>
+        </Card>
+      ) : null}
+      <div className="space-y-3">
+        {presets.data?.map((preset) => (
+          <Card key={preset.id}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <p className="font-medium">{preset.name}</p>
+                <p className="line-clamp-3 text-sm text-muted-foreground">{preset.prompt}</p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setDraft({ name: preset.name, prompt: preset.prompt });
+                    setFormError(null);
+                    setEditor({ mode: "edit", id: preset.id });
+                  }}
+                >
+                  Изменить
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => setDeleteTarget(preset)}>
+                  Удалить
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+      <Dialog
+        open={editor !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditor(null);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editor?.mode === "edit" ? "Изменить пресет" : "Новый пресет"}</DialogTitle>
+            <DialogDescription>Имя и текст стиля картинки. Его переформулирует модель промпта.</DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="image-preset-name">Имя</Label>
+              <Input
+                id="image-preset-name"
+                value={draft.name}
+                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="image-preset-prompt">Промпт стиля</Label>
+              <Textarea
+                id="image-preset-prompt"
+                value={draft.prompt}
+                onChange={(event) => setDraft((current) => ({ ...current, prompt: event.target.value }))}
+              />
+            </div>
+            <ErrorText message={formError} />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditor(null)}>
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              onClick={() => save.mutate()}
+              disabled={save.isPending || !draft.name.trim() || draft.prompt.trim().length < 10}
             >
               {save.isPending ? "Сохранение…" : "Сохранить"}
             </Button>

@@ -28,14 +28,15 @@
 | `POST` | `/library/books/:id/reindex` | `202`. Пока статус `indexing` — `409` |
 | `DELETE` | `/library/books/:id` | векторы через Python, затем storage. Посты не удаляются. `indexing` → `409`. Python недоступен → `502`, книга остаётся |
 | `GET/POST/PATCH/DELETE` | `/presets` | `name`, `description` (после trim не короче 10 символов), `examples` (до 5, необязательны). Пустое описание — `400`. Удаление пресета обнуляет `presetId` у постов |
+| `GET/POST/PATCH/DELETE` | `/image-presets` | `name`, `prompt` (после trim от 10 до 4000 символов). Стиль картинки, отдельно от пресета текста. Удаление обнуляет `imagePresetId` у постов |
 | `GET` | `/posts`, `/posts/:id` | список и карточка, новые сверху |
 | `GET` | `/posts/:id/image` | `image/png` по `imageKey` через StorageProvider. Пустой ключ или нет файла — `404` |
 | `DELETE` | `/posts/:id` | БД и папка. Во время генерации этого поста — `409` |
 | `POST` | `/posts/:id/open-folder` | `200`. `explorer.exe` только при `STORAGE_DRIVER=fs` и Windows. Иначе `400` |
-| `POST` | `/generate/posts` | `202 { jobId, postId }`. Тело: `topic`, `tone`, `length` S/M/L, `emoji`, `knowledgeMode`, `citations`, `structure`, `bookIds`, `topK`, `presetId`, `temperature`, `width`, `height`, `steps`, `seed` |
+| `POST` | `/generate/posts` | `202 { jobId, postId }`. Тело: `topic`, `tone`, `length` S/M/L, `emoji`, `knowledgeMode`, `citations`, `structure`, `bookIds`, `topK`, `presetId`, `imagePresetId`, `temperature`, `width`, `height`, `steps`, `seed` |
 | `GET` | `/generate/posts/:id/events` | SSE, события Python как есть |
 | `POST` | `/posts/:id/regenerate-text` | новый job, тот же URL событий. Перезаписывает `post.md` / `post.txt`, картинку не трогает |
-| `POST` | `/posts/:id/regenerate-image` | тело `{ seed? }`. Нет `seed` — случайный. Число уходит в Python. Пишет `image.png`, `image_prompt.txt` и seed. Текст не трогает |
+| `POST` | `/posts/:id/regenerate-image` | тело `{ seed?, imagePresetId? }`. Нет `seed` — случайный. Нет `imagePresetId` — стиль поста как есть; `null` снимает стиль; строка проверяется и пишется на пост до джобы. Пишет `image.png`, `image_prompt.txt` и seed. Текст не трогает |
 | `POST` | `/generate/posts/:id/cancel` | `202 { jobId, status: "cancelled" }`. Джоба не `running` — `409`. Нет джобы — `404` |
 | `GET` | `/gpu/status` | прокси FastAPI: `{ locked, tenant, ollama_models, vram_used_mb }`. FastAPI недоступен — `502` |
 
@@ -112,9 +113,9 @@ TRANSFORMERS_CACHE=D:/huggingface_cache/transformers
 
 - `POST /pipeline/stream` — retrieve (если не `general`) → стрим русского текста → английский image prompt той же LLM (`think: false`) → `gpu_unload_llm` → Flux → файлы джобы.
 - `POST /pipeline/text/stream` — тот же текст без Flux. Пишет только `post.txt`.
-- `POST /pipeline/image/stream` — `{ "text" }` → image prompt → Flux. `post.txt` не пишет и не меняет.
+- `POST /pipeline/image/stream` — `{ "text", "image_style"? }` → image prompt → Flux. `post.txt` не пишет и не меняет. Непустой `image_style` дописывается к тексту поста блоком «Стиль картинки» и уходит только в LLM промпта. Flux получает её английскую строку.
 
-Тело поста: `topic`, `tone` (пусто → «живой, разговорный»), `length` `S|M|L` (около 500 / 1200 / 2500 символов), `emoji` default false, `knowledge_mode` default `rag`, `citations` default false, `structure` `{hooks, body, cta}` default все true, `book_ids`, `top_k` default 10 (1–20), `preset` `{description, examples}` до 5 примеров. Картинка: `width` / `height` / `steps` / `seed`, дефолт 1024×1024 и 28 steps. `job_id` опционален (`[A-Za-z0-9-]{1,80}`).
+Тело поста: `topic`, `tone` (пусто → «живой, разговорный»), `length` `S|M|L` (около 500 / 1200 / 2500 символов), `emoji` default false, `knowledge_mode` default `rag`, `citations` default false, `structure` `{hooks, body, cta}` default все true, `book_ids`, `top_k` default 10 (1–20), `preset` `{description, examples}` до 5 примеров, `image_style` до 4000 символов. Картинка: `width` / `height` / `steps` / `seed`, дефолт 1024×1024 и 28 steps. `job_id` опционален (`[A-Za-z0-9-]{1,80}`).
 
 SSE: `status` (`start`, `retrieve`, `text`, `image_prompt`, `load_flux`, `generate`, `unload_flux`; в data есть `job_id`), `token` `{"text"}`, `text_done` `{"text","sources"}`, `image_prompt` `{"prompt"}`, `gpu_unload_llm` `{"ok": true}`, `image_progress` `{"step","total"}`, `image_done` `{"path","seed","prompt"}`, `cancelled` `{"message":"отменено"}`, `error` `{"message"}`.
 

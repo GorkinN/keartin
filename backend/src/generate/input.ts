@@ -17,6 +17,7 @@ export type GenerateInput = {
   bookIds: string[];
   topK: number;
   presetId: string | null;
+  imagePresetId: string | null;
   temperature: number | null;
   width: number;
   height: number;
@@ -44,7 +45,8 @@ export function parseGenerateInput(body: unknown): GenerateInput {
   const structure = parseStructure(body.structure);
   const bookIds = parseBookIds(body.bookIds);
   const topK = optionalInt(body.topK, 10, 1, 20, "topK");
-  const presetId = parsePresetId(body.presetId);
+  const presetId = parseOptionalId(body.presetId, "presetId");
+  const imagePresetId = parseOptionalId(body.imagePresetId, "imagePresetId");
   const temperature =
     body.temperature === undefined || body.temperature === null
       ? null
@@ -72,6 +74,7 @@ export function parseGenerateInput(body: unknown): GenerateInput {
     bookIds,
     topK,
     presetId,
+    imagePresetId,
     temperature,
     width,
     height,
@@ -104,10 +107,10 @@ function parseBookIds(value: unknown): string[] {
   return ids;
 }
 
-function parsePresetId(value: unknown): string | null {
+function parseOptionalId(value: unknown, name: string): string | null {
   if (value === undefined || value === null || value === "") return null;
   if (typeof value !== "string" || !value.trim()) {
-    throw new BadRequestException("presetId должен быть строкой");
+    throw new BadRequestException(`${name} должен быть строкой`);
   }
   return value.trim();
 }

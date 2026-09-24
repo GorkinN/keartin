@@ -37,6 +37,7 @@ export class GenerateService {
     const input = parseGenerateInput(body);
     await this.assertBooks(input.knowledgeMode, input.bookIds);
     if (input.presetId) await this.requirePreset(input.presetId);
+    if (input.imagePresetId) await this.requireImagePreset(input.imagePresetId);
     await this.ensureAi();
     const post = await this.createPost(input);
     return this.launch(post.id, "full");
@@ -55,6 +56,11 @@ export class GenerateService {
     const post = await this.requirePost(postId);
     if (!post.text.trim()) throw new BadRequestException("нет текста поста");
     await this.ensureIdle(postId);
+    const imagePresetId = parseImagePresetUpdate(body);
+    if (imagePresetId !== undefined) {
+      if (imagePresetId) await this.requireImagePreset(imagePresetId);
+      await this.prisma.post.update({ where: { id: post.id }, data: { imagePresetId } });
+    }
     await this.ensureAi();
     return this.launch(post.id, "image", parseImageSeed(body));
   }
@@ -165,6 +171,7 @@ export class GenerateService {
     const preset = job.post.presetId
       ? await this.prisma.stylePreset.findUnique({ where: { id: job.post.presetId } })
       : null;
+    const imageStyle = await this.imageStyleOf(job.post.imagePresetId);
     let finished = false;
     const fail = async (message: string) => {
       if (finished) return;
@@ -174,8 +181,8 @@ export class GenerateService {
     await this.python.stream(
       streamPath(job.kind),
       job.kind === "image"
-        ? imageBody(job.post, jobId, this.imageSeeds.get(jobId))
-        : postBody(job.post, jobId, preset),
+        ? imageBody(job.post, jobId, imageStyle, this.imageSeeds.get(jobId))
+        : postBody(job.post, jobId, preset, imageStyle),
       async (event) => {
         if (finished) return;
         if (event.event === "cancelled") {
@@ -331,6 +338,7 @@ export class GenerateService {
             bookIds: JSON.stringify(input.bookIds),
             topK: input.topK,
             presetId: input.presetId,
+            imagePresetId: input.imagePresetId,
             temperature: input.temperature,
             width: input.width,
             height: input.height,
@@ -390,6 +398,18 @@ export class GenerateService {
     return preset;
   }
 
+  private async requireImagePreset(id: string) {
+    const preset = await this.prisma.imagePromptPreset.findUnique({ where: { id } });
+    if (!preset) throw new NotFoundException("пресет картинки не найден");
+    return preset;
+  }
+
+  private async imageStyleOf(id: string | null): Promise<string> {
+    if (!id) return "";
+    const preset = await this.prisma.imagePromptPreset.findUnique({ where: { id } });
+    return preset?.prompt.trim() ?? "";
+  }
+
   private async readPng(jobId: string): Promise<Buffer> {
     const root = resolve(this.env.repoRoot, "data", "tmp", "pipeline");
     const file = resolve(root, jobId, "image.png");
@@ -408,7 +428,12 @@ function streamPath(kind: string): string {
   return "/pipeline/stream";
 }
 
-function postBody(post: Post, jobId: string, preset: StylePreset | null): Record<string, unknown> {
+function postBody(
+  post: Post,
+  jobId: string,
+  preset: StylePreset | null,
+  imageStyle: string,
+): Record<string, unknown> {
   const body: Record<string, unknown> = {
     topic: post.topic,
     tone: post.tone,
@@ -432,10 +457,10 @@ function postBody(post: Post, jobId: string, preset: StylePreset | null): Record
       examples: parseStringArray(preset.examples),
     };
   }
-  return body;
+  return withImageStyle(body, imageStyle);
 }
 
-function imageBody(post: Post, jobId: string, seed?: number): Record<string, unknown> {
+function imageBody(post: Post, jobId: string, imageStyle: string, seed?: number): Record<string, unknown> {
   const body: Record<string, unknown> = {
     text: post.text,
     width: post.width,
@@ -445,10 +470,26 @@ function imageBody(post: Post, jobId: string, seed?: number): Record<string, unk
   };
   if (post.temperature !== null) body.temperature = post.temperature;
   if (seed !== undefined) body.seed = seed;
+  return withImageStyle(body, imageStyle);
+}
+
+function withImageStyle(body: Record<string, unknown>, imageStyle: string): Record<string, unknown> {
+  const style = imageStyle.trim();
+  if (style) body.image_style = style;
   return body;
 }
 
 const STORAGE_WRITE_ERROR = "Не удалось записать файлы поста.";
+
+function parseImagePresetUpdate(body: unknown): string | null | undefined {
+  if (!isRecord(body) || !Object.prototype.hasOwnProperty.call(body, "imagePresetId")) return undefined;
+  const value = body.imagePresetId;
+  if (value === null || value === "") return null;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new BadRequestException("imagePresetId должен быть строкой");
+  }
+  return value.trim();
+}
 
 function parseImageSeed(body: unknown): number | undefined {
   if (body === undefined || body === null || body === "") return undefined;

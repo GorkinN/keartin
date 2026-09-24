@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { Post } from "@/api/types";
+import { useQuery } from "@tanstack/react-query";
+import { api, errorMessage } from "@/api/client";
+import type { ImagePromptPreset, Post } from "@/api/types";
 import type { GenerationKind } from "@/hooks/useGeneration";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectItem } from "@/components/ui/select";
 import { ErrorText } from "@/components/error-text";
 import { parseSeed } from "@/api/seed";
 
@@ -33,17 +36,26 @@ export function PostPreview({
   cancelling?: boolean;
   onCancel?: () => void;
   onRegenerateText?: () => void;
-  onRegenerateImage?: (seed?: number) => void;
+  onRegenerateImage?: (seed?: number, imagePresetId?: string | null) => void;
   showHistoryLink?: boolean;
 }) {
   const text = liveText ?? post?.text ?? "";
   const showImage = Boolean(post?.imageKey) && running !== "image";
   const [imageFailed, setImageFailed] = useState(false);
   const [seedText, setSeedText] = useState("");
+  const [imagePresetId, setImagePresetId] = useState(post?.imagePresetId ?? "none");
   const seed = parseSeed(seedText);
+  const imagePresets = useQuery({
+    queryKey: ["image-presets"],
+    queryFn: () => api<ImagePromptPreset[]>("/image-presets"),
+    enabled: Boolean(post && onRegenerateImage),
+  });
   useEffect(() => {
     setImageFailed(false);
   }, [post?.id, post?.updatedAt]);
+  useEffect(() => {
+    setImagePresetId(post?.imagePresetId ?? "none");
+  }, [post?.id, post?.imagePresetId]);
   const imagePercent = progress && progress.total > 0 ? (progress.step / progress.total) * 100 : 0;
 
   return (
@@ -87,6 +99,18 @@ export function PostPreview({
       {post && onRegenerateText && onRegenerateImage ? (
         <div className="space-y-3">
           <div className="max-w-xs space-y-1.5">
+            <Label>Стиль картинки</Label>
+            <Select value={imagePresetId} onValueChange={setImagePresetId}>
+              <SelectItem value="none">Без стиля</SelectItem>
+              {(imagePresets.data ?? []).map((preset) => (
+                <SelectItem key={preset.id} value={preset.id}>
+                  {preset.name}
+                </SelectItem>
+              ))}
+            </Select>
+            {imagePresets.isError ? <ErrorText message={errorMessage(imagePresets.error)} /> : null}
+          </div>
+          <div className="max-w-xs space-y-1.5">
             <Label htmlFor="regen-seed">Seed картинки</Label>
             <Input
               id="regen-seed"
@@ -110,7 +134,7 @@ export function PostPreview({
               type="button"
               variant="outline"
               disabled={running !== null || !post.text || Boolean(gpuLabel) || Boolean(seed.error)}
-              onClick={() => onRegenerateImage(seed.value)}
+              onClick={() => onRegenerateImage(seed.value, imagePresetId === "none" ? null : imagePresetId)}
             >
               Перегенерировать картинку
             </Button>

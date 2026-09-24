@@ -26,6 +26,13 @@ from app.settings import get_settings
 router = APIRouter(prefix="/pipeline")
 
 
+def _clean_image_style(value: str) -> str:
+    text = value.strip()
+    if len(text) > 4000:
+        raise ValueError("image_style is longer than 4000 characters")
+    return text
+
+
 class StructureIn(BaseModel):
     hooks: bool = True
     body: bool = True
@@ -67,6 +74,7 @@ class PostPipelineRequest(BaseModel):
     steps: int | None = Field(default=None, ge=20, le=28)
     seed: int | None = None
     job_id: str | None = None
+    image_style: str = ""
 
     @field_validator("topic", "tone")
     @classmethod
@@ -109,6 +117,11 @@ class PostPipelineRequest(BaseModel):
             raise ValueError("invalid job_id")
         return job_id
 
+    @field_validator("image_style")
+    @classmethod
+    def strip_image_style(cls, value: str) -> str:
+        return _clean_image_style(value)
+
     def to_spec(self) -> PostSpec:
         preset = self.preset or PresetIn()
         return PostSpec(
@@ -131,6 +144,7 @@ class PostPipelineRequest(BaseModel):
             steps=self.steps or 28,
             seed=self.seed,
             job_id=self.job_id,
+            image_style=self.image_style,
         )
 
 
@@ -142,6 +156,7 @@ class ImagePipelineRequest(BaseModel):
     steps: int | None = Field(default=None, ge=20, le=28)
     seed: int | None = None
     job_id: str | None = None
+    image_style: str = ""
 
     @field_validator("text")
     @classmethod
@@ -170,6 +185,11 @@ class ImagePipelineRequest(BaseModel):
             raise ValueError("invalid job_id")
         return job_id
 
+    @field_validator("image_style")
+    @classmethod
+    def strip_image_style(cls, value: str) -> str:
+        return _clean_image_style(value)
+
     def to_spec(self) -> ImageSpec:
         return ImageSpec(
             text=self.text,
@@ -179,6 +199,7 @@ class ImagePipelineRequest(BaseModel):
             steps=self.steps or 28,
             seed=self.seed,
             job_id=self.job_id,
+            image_style=self.image_style,
         )
 
 

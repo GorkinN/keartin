@@ -62,6 +62,7 @@ class PostSpec:
     steps: int
     seed: int | None
     job_id: str | None
+    image_style: str = ""
 
 
 @dataclass(frozen=True)
@@ -73,6 +74,7 @@ class ImageSpec:
     steps: int
     seed: int | None
     job_id: str | None
+    image_style: str = ""
 
 
 def resolve_job_id(job_id: str | None) -> str:
@@ -163,10 +165,14 @@ def build_post_user_message(spec: PostSpec, hits: list[SearchHit]) -> str:
     return "\n\n".join(parts)
 
 
-def build_image_messages(post_text: str) -> list[dict[str, str]]:
+def build_image_messages(post_text: str, image_style: str = "") -> list[dict[str, str]]:
+    user = post_text.strip()
+    style = image_style.strip()
+    if style:
+        user = f"{user}\n\nСтиль картинки:\n{style}"
     return [
         {"role": "system", "content": load_image_system_prompt()},
-        {"role": "user", "content": post_text.strip()},
+        {"role": "user", "content": user},
     ]
 
 
@@ -257,7 +263,9 @@ async def iter_post_events(
                 yield _cancelled()
                 return
             yield _status("image_prompt", job_id)
-            image_prompt = await _image_prompt_from_llm(client, text, spec.temperature, stop=stop)
+            image_prompt = await _image_prompt_from_llm(
+                client, text, spec.temperature, spec.image_style, stop=stop
+            )
             if _stopped(stop):
                 yield _cancelled()
                 return
@@ -330,7 +338,9 @@ async def iter_image_events(
                 yield _cancelled()
                 return
             yield _status("image_prompt", job_id)
-            image_prompt = await _image_prompt_from_llm(client, spec.text, spec.temperature, stop=stop)
+            image_prompt = await _image_prompt_from_llm(
+                client, spec.text, spec.temperature, spec.image_style, stop=stop
+            )
             if _stopped(stop):
                 yield _cancelled()
                 return
@@ -384,10 +394,11 @@ async def _image_prompt_from_llm(
     client: OllamaClient,
     post_text: str,
     temperature: float | None,
+    image_style: str = "",
     stop: threading.Event | None = None,
 ) -> str:
     raw = await client.chat(
-        messages=build_image_messages(post_text),
+        messages=build_image_messages(post_text, image_style),
         temperature=temperature,
         stop=stop,
     )

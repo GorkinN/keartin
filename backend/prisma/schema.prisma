@@ -31,6 +31,15 @@ model StylePreset {
   posts       Post[]
 }
 
+model ImagePromptPreset {
+  id        String   @id @default(cuid())
+  name      String
+  prompt    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  posts     Post[]
+}
+
 model Post {
   id            String         @id @default(cuid())
   topic         String
@@ -45,7 +54,9 @@ model Post {
   bookIds       String         @default("[]")
   topK          Int            @default(10)
   presetId      String?
-  preset        StylePreset?   @relation(fields: [presetId], references: [id], onDelete: SetNull)
+  preset        StylePreset?        @relation(fields: [presetId], references: [id], onDelete: SetNull)
+  imagePresetId String?
+  imagePreset   ImagePromptPreset?  @relation(fields: [imagePresetId], references: [id], onDelete: SetNull)
   temperature   Float?
   width         Int            @default(1024)
   height        Int            @default(1024)

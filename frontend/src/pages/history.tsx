@@ -134,12 +134,11 @@ export function HistoryDetailPage() {
             onCancel={() => void generation.cancel()}
             showHistoryLink={false}
             onRegenerateText={() => void generation.run("text", `/posts/${post.id}/regenerate-text`)}
-            onRegenerateImage={(nextSeed) =>
-              void generation.run(
-                "image",
-                `/posts/${post.id}/regenerate-image`,
-                nextSeed === undefined ? {} : { seed: nextSeed },
-              )
+            onRegenerateImage={(nextSeed, nextImagePresetId) =>
+              void generation.run("image", `/posts/${post.id}/regenerate-image`, {
+                ...(nextSeed === undefined ? {} : { seed: nextSeed }),
+                imagePresetId: nextImagePresetId ?? null,
+              })
             }
           />
           {post.sources.length > 0 ? (

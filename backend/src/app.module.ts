@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { AiModule } from "./ai/ai.module";
 import { GenerateModule } from "./generate/generate.module";
+import { ImagePresetsModule } from "./image-presets/image-presets.module";
 import { HealthModule } from "./health/health.module";
 import { LibraryModule } from "./library/library.module";
 import { PostsModule } from "./posts/posts.module";
@@ -17,6 +18,7 @@ import { StorageModule } from "./storage/storage.module";
     HealthModule,
     LibraryModule,
     PresetsModule,
+    ImagePresetsModule,
     GenerateModule,
     PostsModule,
   ],

@@ -11,6 +11,7 @@ from app.pipeline.post_pipeline import (
     INSUFFICIENT_CONTEXT,
     PipelineError,
     PostSpec,
+    build_image_messages,
     build_post_messages,
     build_post_user_message,
     clean_image_prompt,
@@ -162,6 +163,18 @@ def test_save_png_does_not_change_post(tmp_path, monkeypatch: pytest.MonkeyPatch
     save_png("job-1", Image.new("RGB", (8, 8), "red"))
     assert (tmp_path / "job-1" / "post.txt").read_bytes() == before
     assert (tmp_path / "job-1" / "image.png").is_file()
+
+
+def test_image_messages_without_style_are_post_text() -> None:
+    messages = build_image_messages("Красный квадрат")
+    assert messages[1]["content"] == "Красный квадрат"
+    assert "Стиль картинки:" not in messages[1]["content"]
+
+
+def test_image_messages_include_style_block() -> None:
+    messages = build_image_messages("Красный квадрат", "акварель, мягкий свет")
+    assert messages[1]["content"] == "Красный квадрат\n\nСтиль картинки:\nакварель, мягкий свет"
+    assert "акварель" not in messages[0]["content"]
 
 
 def test_clean_image_prompt_strips_fence() -> None:

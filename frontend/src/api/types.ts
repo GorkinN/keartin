@@ -31,6 +31,7 @@ export type Post = {
   bookIds: string[];
   topK: number;
   presetId: string | null;
+  imagePresetId: string | null;
   temperature: number | null;
   width: number;
   height: number;
@@ -45,6 +46,14 @@ export type Post = {
   sources: SourceRef[];
   status: string;
   activeJobId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ImagePromptPreset = {
+  id: string;
+  name: string;
+  prompt: string;
   createdAt: string;
   updatedAt: string;
 };
