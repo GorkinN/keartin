@@ -78,6 +78,13 @@ export class PythonClient {
     return this.json<GpuStatus>("/gpu/status", { method: "GET", timeoutMs: 10_000 });
   }
 
+  async settleGpu(): Promise<{ ok: boolean; skipped: boolean }> {
+    return this.json<{ ok: boolean; skipped: boolean }>("/gpu/settle", {
+      method: "POST",
+      timeoutMs: 90_000,
+    });
+  }
+
   async cancelPipeline(jobId: string): Promise<void> {
     await this.json(`/pipeline/jobs/${encodeURIComponent(jobId)}/cancel`, {
       method: "POST",

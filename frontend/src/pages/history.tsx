@@ -127,6 +127,7 @@ export function HistoryDetailPage() {
             liveText={generation.liveText}
             progress={generation.progress}
             running={generation.running}
+            queued={generation.queued}
             error={generation.error}
             notice={generation.notice}
             gpuLabel={gpuLabel}

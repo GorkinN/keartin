@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { consumeSse, flushSse } from "../src/ai/sse";
+import { batchSeed } from "../src/generate/input";
 import { localDateStamp, nextStoragePrefix, slugifyTopic } from "../src/posts/slug";
+
+assert.equal(batchSeed(null, 0, 3), null);
+assert.equal(batchSeed(42, 0, 1), 42);
+assert.equal(batchSeed(42, 0, 3), 42);
+assert.equal(batchSeed(42, 2, 3), 44);
+assert.equal(batchSeed(2_147_483_647, 1, 2), 0);
 
 assert.equal(slugifyTopic("цена и спрос"), "tsena-i-spros");
 assert.equal(slugifyTopic("  Привет, мир!  "), "privet-mir");

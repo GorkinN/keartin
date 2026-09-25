@@ -31,16 +31,20 @@
 | `GET/POST/PATCH/DELETE` | `/image-presets` | `name`, `prompt` (после trim от 10 до 4000 символов). Стиль картинки, отдельно от пресета текста. Удаление обнуляет `imagePresetId` у постов |
 | `GET` | `/posts`, `/posts/:id` | список и карточка, новые сверху |
 | `GET` | `/posts/:id/image` | `image/png` по `imageKey` через StorageProvider. Пустой ключ или нет файла — `404` |
-| `DELETE` | `/posts/:id` | БД и папка. Во время генерации этого поста — `409` |
+| `DELETE` | `/posts/:id` | БД и папка. Пост в очереди или во время генерации — `409` |
 | `POST` | `/posts/:id/open-folder` | `200`. `explorer.exe` только при `STORAGE_DRIVER=fs` и Windows. Иначе `400` |
-| `POST` | `/generate/posts` | `202 { jobId, postId }`. Тело: `topic`, `tone`, `length` S/M/L, `emoji`, `knowledgeMode`, `citations`, `structure`, `bookIds`, `topK`, `presetId`, `imagePresetId`, `temperature`, `width`, `height`, `steps`, `seed` |
-| `GET` | `/generate/posts/:id/events` | SSE, события Python как есть |
-| `POST` | `/posts/:id/regenerate-text` | новый job, тот же URL событий. Перезаписывает `post.md` / `post.txt`, картинку не трогает |
-| `POST` | `/posts/:id/regenerate-image` | тело `{ seed?, imagePresetId? }`. Нет `seed` — случайный. Нет `imagePresetId` — стиль поста как есть; `null` снимает стиль; строка проверяется и пишется на пост до джобы. Пишет `image.png`, `image_prompt.txt` и seed. Текст не трогает |
-| `POST` | `/generate/posts/:id/cancel` | `202 { jobId, status: "cancelled" }`. Джоба не `running` — `409`. Нет джобы — `404` |
+| `POST` | `/generate/posts` | `202 { items: [{ jobId, postId }] }`. Тело как раньше плюс `count` `1..20` (дефолт 1). Столько черновиков встаёт в хвост очереди. Если `seed` задан и `count` > 1, у поста с индексом `i` seed `seed + i` по модулю 2³¹ |
+| `GET` | `/generate/queue` | `{ cooldownUntil, items }`. `items`: `queued` и `running` по `createdAt`, с `topic` и `kind`. `cooldownUntil` — ISO-время конца минутной паузы или `null` |
+| `DELETE` | `/generate/queue/:jobId` | Только `queued`. Черновик полного поста удаляется вместе с джобой. Иначе `409`, нет джобы — `404` |
+| `GET` | `/generate/posts/:id/events` | SSE. Пока джоба `queued`, первым событием `status` `{ phase: "queued" }`, дальше поток Python |
+| `POST` | `/posts/:id/regenerate-text` | Новый job в ту же очередь, тот же URL событий. Перезаписывает `post.md` / `post.txt`, картинку не трогает |
+| `POST` | `/posts/:id/regenerate-image` | Тело `{ seed?, imagePresetId? }`. Джоба встаёт в очередь. Нет `seed` — случайный. Нет `imagePresetId` — стиль поста как есть; `null` снимает стиль; строка проверяется и пишется на пост до джобы. Пишет `image.png`, `image_prompt.txt` и seed. Текст не трогает |
+| `POST` | `/generate/posts/:id/cancel` | `202 { jobId, status: "cancelled" }`. Джоба не `running` — `409`. Нет джобы — `404`. Хвост очереди после отмены продолжается |
 | `GET` | `/gpu/status` | прокси FastAPI: `{ locked, tenant, ollama_models, vram_used_mb }`. FastAPI недоступен — `502` |
 
-`rag` без книг или с книгой не в `ready` — `409` до вызова Python. Неизвестный пресет или книга — `404`. FastAPI недоступен до старта — `502`, строка поста не создаётся. Пустой RAG, Ollama и GPU приходят событием `error` уже по-русски, джоба `failed`. Запись файлов при сбое диска или MinIO — «Не удалось записать файлы поста.» Параллельный generate ждёт lock в Python. Отдельного `409` на занятый GPU нет: UI выключает кнопки, пока `locked`. На одном посте второй запуск по-прежнему `409`.
+Очередь одна на полный пост, перегенерацию текста и картинки. Воркер Nest берёт следующую `queued` только после записи файлов текущего поста. Если хвост не пуст, он зовёт `POST /gpu/settle` (выгрузка Flux/OCR и Ollama, ожидание VRAM; если лок занят — пропуск) и ждёт 60 секунд. Пустой хвост паузу не включает. Снятие всего хвоста прерывает паузу. Ошибка или отмена одного поста хвост не останавливает.
+
+`rag` без книг или с книгой не в `ready` — `409` до вызова Python. Неизвестный пресет или книга — `404`. FastAPI недоступен до старта — `502`, строка поста не создаётся. Пустой RAG, Ollama и GPU приходят событием `error` уже по-русски, джоба `failed`. Запись файлов при сбое диска или MinIO — «Не удалось записать файлы поста.» На одном посте вторая джоба (`queued` или `running`) — `409`. Занятый GPU кнопку очереди не блокирует. Рестарт помечает `running` и их черновики как `failed` («прервано перезапуском»); `queued` и их черновики остаются, воркер продолжает хвост без досиживания паузы.
 
 Отмена не рвёт SSE Nest→Python. Nest зовёт `POST /pipeline/jobs/:id/cancel`. Во время текста httpx-стрим к Ollama закрывается, Flux не стартует. Если Flux уже считает, прогон доходит до конца, PNG в пост не пишется, событие `cancelled` `{ message: "отменено" }`. `gpu.release` остаётся в `finally`. Черновик, который ещё не `ready`, становится `failed`; уже готовый пост остаётся `ready`, старые файлы на месте. Если `text_done` уже записан в SQLite, текст в строке остаётся, папку поста отмена не создаёт.
 
@@ -78,7 +82,7 @@
 
 ## GPU
 
-`ai-service/app/gpu/manager.py`: один `asyncio.Lock`. Тенанты `llm` | `flux` | `ocr`. Захват `flux` или `ocr` выгружает Ollama и другую torch-модель; release выгружает свою. Эмбеды `bge-m3` — CPU, lock для них не нужен.
+`ai-service/app/gpu/manager.py`: один `asyncio.Lock`. Тенанты `llm` | `flux` | `ocr`. Захват `flux` или `ocr` выгружает Ollama и другую torch-модель; release выгружает свою. `POST /gpu/settle` делает то же, когда лок свободен, и возвращает `{ ok, skipped }`. Эмбеды `bge-m3` — CPU, lock для них не нужен.
 
 Любой вызов Ollama в обход GpuManager — баг. Правило в `.cursorrules`.
 

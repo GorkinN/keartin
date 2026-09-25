@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
-import type { JobStart, Post } from "@/api/types";
-import { useSse } from "@/hooks/useSse";
+import type { JobStart, Post, QueueItem } from "@/api/types";
+import { useSse, type SseCallbacks } from "@/hooks/useSse";
 
 export type GenerationKind = "full" | "text" | "image";
 
@@ -11,9 +11,11 @@ export function useGeneration(onPost: (post: Post) => void) {
   const { start } = useSse();
   const onPostRef = useRef(onPost);
   onPostRef.current = onPost;
+  const watchedRef = useRef<string | null>(null);
   const [liveText, setLiveText] = useState<string | null>(null);
   const [progress, setProgress] = useState<{ step: number; total: number } | null>(null);
   const [running, setRunning] = useState<GenerationKind | null>(null);
+  const [queued, setQueued] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -33,63 +35,103 @@ export function useGeneration(onPost: (post: Post) => void) {
     [queryClient],
   );
 
+  const finish = useCallback(() => {
+    setCancelling(false);
+    setQueued(false);
+    setRunning(null);
+    setJobId(null);
+    setProgress(null);
+    void queryClient.invalidateQueries({ queryKey: ["generate-queue"] });
+  }, [queryClient]);
+
+  const bind = useCallback(
+    (nextJobId: string, postId: string, kind: GenerationKind) => {
+      const callbacks: SseCallbacks = {
+        onToken: (chunk) => {
+          setQueued(false);
+          setNotice(null);
+          if (kind === "image") return;
+          setLiveText((current) => (current ?? "") + chunk);
+        },
+        onText: (text) => {
+          setQueued(false);
+          if (kind === "image") return;
+          setLiveText(text);
+        },
+        onImageProgress: (step, total) => {
+          setQueued(false);
+          setProgress({ step, total });
+        },
+        onQueued: () => {
+          setQueued(true);
+          setNotice("В очереди");
+        },
+        onError: (message) => {
+          setError(message);
+          finish();
+          void refreshPost(postId);
+        },
+        onCancelled: () => {
+          setNotice("Отменено");
+          finish();
+          void refreshPost(postId);
+        },
+        onDone: () => {
+          finish();
+          void refreshPost(postId);
+        },
+      };
+      start(nextJobId, kind === "text" ? "text" : "image", callbacks);
+    },
+    [finish, refreshPost, start],
+  );
+
+  const begin = useCallback((kind: GenerationKind, nextJobId: string) => {
+    setError(null);
+    setNotice(null);
+    setCancelling(false);
+    setQueued(false);
+    setRunning(kind);
+    setJobId(nextJobId);
+    if (kind !== "image") setLiveText("");
+    setProgress(kind === "image" ? { step: 0, total: 0 } : null);
+  }, []);
+
+  const watch = useCallback(
+    (item: QueueItem) => {
+      if (watchedRef.current === item.jobId) return;
+      watchedRef.current = item.jobId;
+      begin(item.kind, item.jobId);
+      void api<Post>(`/posts/${item.postId}`)
+        .then((next) => onPostRef.current(next))
+        .catch((caught: unknown) => setError(errorMessage(caught)));
+      bind(item.jobId, item.postId, item.kind);
+    },
+    [begin, bind],
+  );
+
   const run = useCallback(
     async (kind: GenerationKind, path: string, body?: unknown) => {
-      setError(null);
-      setNotice(null);
-      setCancelling(false);
-      setRunning(kind);
-      if (kind !== "image") setLiveText("");
-      setProgress(kind === "image" ? { step: 0, total: 0 } : null);
+      begin(kind, "");
       try {
         const started = await api<JobStart>(path, {
           method: "POST",
           body: body === undefined ? undefined : JSON.stringify(body),
         });
+        watchedRef.current = started.jobId;
         setJobId(started.jobId);
-        start(started.jobId, kind === "text" ? "text" : "image", {
-          onToken: (chunk) => {
-            if (kind === "image") return;
-            setLiveText((current) => (current ?? "") + chunk);
-          },
-          onText: (text) => {
-            if (kind === "image") return;
-            setLiveText(text);
-          },
-          onImageProgress: (step, total) => setProgress({ step, total }),
-          onError: (message) => {
-            setError(message);
-            setCancelling(false);
-            setRunning(null);
-            setJobId(null);
-            setProgress(null);
-            void refreshPost(started.postId);
-          },
-          onCancelled: () => {
-            setNotice("Отменено");
-            setCancelling(false);
-            setRunning(null);
-            setJobId(null);
-            setProgress(null);
-            void refreshPost(started.postId);
-          },
-          onDone: () => {
-            setCancelling(false);
-            setRunning(null);
-            setJobId(null);
-            setProgress(null);
-            void refreshPost(started.postId);
-          },
-        });
+        bind(started.jobId, started.postId, kind);
       } catch (caught) {
+        watchedRef.current = null;
         setCancelling(false);
+        setQueued(false);
         setRunning(null);
         setJobId(null);
         setProgress(null);
         setError(errorMessage(caught));
       }
     },
-    [refreshPost, start],
+    [begin, bind],
   );
 
   const cancel = useCallback(async () => {
@@ -97,12 +139,16 @@ export function useGeneration(onPost: (post: Post) => void) {
     setCancelling(true);
     setError(null);
     try {
-      await api(`/generate/posts/${jobId}/cancel`, { method: "POST" });
+      if (queued) {
+        await api(`/generate/queue/${jobId}`, { method: "DELETE" });
+      } else {
+        await api(`/generate/posts/${jobId}/cancel`, { method: "POST" });
+      }
     } catch (caught) {
       setCancelling(false);
       setError(errorMessage(caught));
     }
-  }, [cancelling, jobId]);
+  }, [cancelling, jobId, queued]);
 
-  return { liveText, progress, running, jobId, cancelling, notice, error, run, cancel };
+  return { liveText, progress, running, queued, jobId, cancelling, notice, error, run, watch, cancel };
 }

@@ -71,3 +71,34 @@ def test_llm_tenant_evicts_ocr(ollama_unloads: list[int]) -> None:
     asyncio.run(scenario())
     assert ocr.unloads == 1
     assert ollama_unloads == []
+
+
+def test_settle_unloads_flux_and_ollama_when_idle(ollama_unloads: list[int]) -> None:
+    gpu = GpuManager(Settings())
+    flux = FakeHolder(loaded=True)
+    gpu.attach_flux(flux)
+
+    async def scenario() -> None:
+        assert await gpu.settle() is True
+
+    asyncio.run(scenario())
+    assert flux.unloads == 1
+    assert ollama_unloads == [1]
+    assert gpu.tenant is None
+    assert not gpu.locked
+
+
+def test_settle_skips_when_lock_held(ollama_unloads: list[int]) -> None:
+    gpu = GpuManager(Settings())
+    flux = FakeHolder(loaded=True)
+    gpu.attach_flux(flux)
+
+    async def scenario() -> None:
+        await gpu.acquire("llm")
+        assert await gpu.settle() is False
+        await gpu.release()
+
+    asyncio.run(scenario())
+    assert flux.unloads == 1
+    assert ollama_unloads == []
+    assert not gpu.locked

@@ -44,10 +44,10 @@ export class PostsService {
 
   async remove(id: string): Promise<{ ok: true }> {
     const post = await this.find(id);
-    const running = await this.prisma.generationJob.count({
-      where: { postId: id, status: "running" },
+    const active = await this.prisma.generationJob.count({
+      where: { postId: id, status: { in: ["queued", "running"] } },
     });
-    if (running > 0) throw new ConflictException("нельзя удалить пост во время генерации");
+    if (active > 0) throw new ConflictException("нельзя удалить пост, пока он в очереди или генерируется");
     await this.storage.deletePrefix(post.storagePrefix);
     await this.prisma.post.delete({ where: { id } });
     return { ok: true };

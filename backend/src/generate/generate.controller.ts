@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { GenerateService } from "./generate.service";
 
@@ -10,6 +10,16 @@ export class GenerateController {
   @HttpCode(202)
   start(@Body() body: unknown) {
     return this.generate.start(body);
+  }
+
+  @Get("queue")
+  queue() {
+    return this.generate.queue();
+  }
+
+  @Delete("queue/:jobId")
+  removeQueued(@Param("jobId") jobId: string) {
+    return this.generate.removeQueued(jobId);
   }
 
   @Get("posts/:id/events")

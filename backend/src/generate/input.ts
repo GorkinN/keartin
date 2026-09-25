@@ -23,7 +23,16 @@ export type GenerateInput = {
   height: number;
   steps: number;
   seed: number | null;
+  count: number;
 };
+
+const SEED_SPAN = 2_147_483_648;
+
+/** First post keeps `seed`. Later posts use `seed + index`, wrapped into int32. */
+export function batchSeed(seed: number | null, index: number, count: number): number | null {
+  if (seed === null || count <= 1) return seed;
+  return (seed + index) % SEED_SPAN;
+}
 
 export function parseGenerateInput(body: unknown): GenerateInput {
   if (!isRecord(body)) throw new BadRequestException("ожидается JSON-объект");
@@ -61,6 +70,7 @@ export function parseGenerateInput(body: unknown): GenerateInput {
     body.seed === undefined || body.seed === null
       ? null
       : optionalInt(body.seed, 0, 0, 2_147_483_647, "seed");
+  const count = optionalInt(body.count, 1, 1, 20, "count");
   return {
     topic,
     tone,
@@ -80,6 +90,7 @@ export function parseGenerateInput(body: unknown): GenerateInput {
     height,
     steps,
     seed,
+    count,
   };
 }
 

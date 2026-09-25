@@ -83,5 +83,22 @@ export type JobStart = {
   postId: string;
 };
 
+export type EnqueueResult = {
+  items: JobStart[];
+};
+
+export type QueueItem = {
+  jobId: string;
+  postId: string;
+  topic: string;
+  kind: "full" | "text" | "image";
+  status: "queued" | "running";
+};
+
+export type GenerateQueue = {
+  cooldownUntil: string | null;
+  items: QueueItem[];
+};
+
 export type KnowledgeMode = "rag" | "rag_plus" | "general";
 export type PostLength = "S" | "M" | "L";

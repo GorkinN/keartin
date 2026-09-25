@@ -80,6 +80,29 @@ class GpuManager:
         if error:
             raise error
 
+    async def settle(self) -> bool:
+        """Unload leftover models when idle. False if another tenant holds the lock."""
+        if self._lock.locked():
+            logger.info("gpu settle skipped: lock held")
+            return False
+        try:
+            await asyncio.wait_for(self._lock.acquire(), timeout=0.05)
+        except TimeoutError:
+            logger.info("gpu settle skipped: lock held")
+            return False
+        try:
+            for name in list(self._holders):
+                await self._ensure_unloaded(name)
+            logger.info("gpu settle: unload LLM")
+            await unload_ollama(OllamaClient(self._settings))
+            await wait_vram_released(self._settings.gpu_free_mb_threshold)
+            self._tenant = None
+            logger.info("gpu settle done")
+            return True
+        finally:
+            if self._lock.locked():
+                self._lock.release()
+
     async def _ensure_unloaded(self, name: str) -> None:
         holder = self._holders.get(name)
         if holder is None or not holder.loaded:

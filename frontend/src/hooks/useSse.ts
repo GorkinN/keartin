@@ -8,6 +8,7 @@ export type SseCallbacks = {
   onImageProgress: (step: number, total: number) => void;
   onError: (message: string) => void;
   onCancelled: (message: string) => void;
+  onQueued: () => void;
   onDone: () => void;
 };
 
@@ -71,6 +72,7 @@ export function useSse() {
 
       source.addEventListener("status", (event) => {
         const data = readData(event);
+        if (data?.phase === "queued") callbacks.onQueued();
         if (data?.phase === "done") succeed();
       });
 

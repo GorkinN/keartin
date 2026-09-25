@@ -17,6 +17,7 @@ export function PostPreview({
   liveText,
   progress,
   running,
+  queued = false,
   error,
   notice,
   gpuLabel,
@@ -30,6 +31,7 @@ export function PostPreview({
   liveText: string | null;
   progress: { step: number; total: number } | null;
   running: GenerationKind | null;
+  queued?: boolean;
   error: string | null;
   notice?: string | null;
   gpuLabel?: string | null;
@@ -66,12 +68,12 @@ export function PostPreview({
       {cancelling && progress ? (
         <p className="text-sm text-muted-foreground">Отмена применится после текущего прогона картинки</p>
       ) : null}
-      {running === "full" || running === "text" ? (
+      {!queued && (running === "full" || running === "text") ? (
         <p className="text-sm text-muted-foreground">Текст пишется…</p>
       ) : null}
       {text ? (
         <pre className="whitespace-pre-wrap font-sans text-sm leading-6">{text}</pre>
-      ) : running ? (
+      ) : !queued && running ? (
         <p className="text-sm text-muted-foreground">Ожидание токенов…</p>
       ) : null}
       {progress && running !== "text" ? (
@@ -125,7 +127,7 @@ export function PostPreview({
             <Button
               type="button"
               variant="outline"
-              disabled={running !== null || !post.text || Boolean(gpuLabel)}
+              disabled={running !== null || !post.text}
               onClick={onRegenerateText}
             >
               Перегенерировать текст
@@ -133,7 +135,7 @@ export function PostPreview({
             <Button
               type="button"
               variant="outline"
-              disabled={running !== null || !post.text || Boolean(gpuLabel) || Boolean(seed.error)}
+              disabled={running !== null || !post.text || Boolean(seed.error)}
               onClick={() => onRegenerateImage(seed.value, imagePresetId === "none" ? null : imagePresetId)}
             >
               Перегенерировать картинку

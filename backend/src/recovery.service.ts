@@ -21,7 +21,10 @@ export class RecoveryService implements OnModuleInit {
       data: { status: "failed", error: RESTART_JOB },
     });
     await this.prisma.post.updateMany({
-      where: { status: "draft" },
+      where: {
+        status: "draft",
+        jobs: { none: { status: "queued" } },
+      },
       data: { status: "failed" },
     });
     const pending = await this.prisma.book.findMany({ where: { status: "indexing" } });

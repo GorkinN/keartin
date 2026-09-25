@@ -5,6 +5,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  OnApplicationBootstrap,
 } from "@nestjs/common";
 import type { Post, StylePreset } from "@prisma/client";
 import type { Response } from "express";
@@ -18,11 +19,21 @@ import { AppEnv } from "../config/env";
 import { PostFiles } from "../posts/post-files";
 import { nextStoragePrefix } from "../posts/slug";
 import { PrismaService } from "../prisma/prisma.service";
-import { parseGenerateInput, type GenerateInput } from "./input";
+import { batchSeed, parseGenerateInput, type GenerateInput } from "./input";
 import { JobHub } from "./job-hub";
 
+const COOLDOWN_MS = 60_000;
+
+export type QueueItem = {
+  jobId: string;
+  postId: string;
+  topic: string;
+  kind: "full" | "text" | "image";
+  status: "queued" | "running";
+};
+
 @Injectable()
-export class GenerateService {
+export class GenerateService implements OnApplicationBootstrap {
   private readonly logger = new Logger(GenerateService.name);
 
   constructor(
@@ -33,14 +44,30 @@ export class GenerateService {
     private readonly hub: JobHub,
   ) {}
 
-  async start(body: unknown): Promise<{ jobId: string; postId: string }> {
+  private pumping = false;
+  private cooldownUntil: string | null = null;
+  private cooldownAbort: AbortController | null = null;
+
+  onApplicationBootstrap(): void {
+    this.kick();
+  }
+
+  async start(body: unknown): Promise<{ items: Array<{ jobId: string; postId: string }> }> {
     const input = parseGenerateInput(body);
     await this.assertBooks(input.knowledgeMode, input.bookIds);
     if (input.presetId) await this.requirePreset(input.presetId);
     if (input.imagePresetId) await this.requireImagePreset(input.imagePresetId);
     await this.ensureAi();
-    const post = await this.createPost(input);
-    return this.launch(post.id, "full");
+    const items: Array<{ jobId: string; postId: string }> = [];
+    for (let index = 0; index < input.count; index += 1) {
+      const post = await this.createPost({
+        ...input,
+        seed: batchSeed(input.seed, index, input.count),
+      });
+      items.push(await this.enqueue(post.id, "full"));
+      this.kick();
+    }
+    return { items };
   }
 
   async regenerateText(postId: string): Promise<{ jobId: string; postId: string }> {
@@ -49,7 +76,9 @@ export class GenerateService {
     const bookIds = parseStringArray(post.bookIds);
     await this.assertBooks(post.knowledgeMode, bookIds);
     await this.ensureAi();
-    return this.launch(post.id, "text");
+    const queued = await this.enqueue(post.id, "text");
+    this.kick();
+    return queued;
   }
 
   async regenerateImage(postId: string, body: unknown): Promise<{ jobId: string; postId: string }> {
@@ -62,7 +91,46 @@ export class GenerateService {
       await this.prisma.post.update({ where: { id: post.id }, data: { imagePresetId } });
     }
     await this.ensureAi();
-    return this.launch(post.id, "image", parseImageSeed(body));
+    const queued = await this.enqueue(post.id, "image", parseImageSeed(body));
+    this.kick();
+    return queued;
+  }
+
+  async queue(): Promise<{ cooldownUntil: string | null; items: QueueItem[] }> {
+    const jobs = await this.prisma.generationJob.findMany({
+      where: { status: { in: ["queued", "running"] } },
+      orderBy: { createdAt: "asc" },
+      include: { post: { select: { topic: true } } },
+    });
+    return {
+      cooldownUntil: this.cooldownUntil,
+      items: jobs.map((job) => ({
+        jobId: job.id,
+        postId: job.postId,
+        topic: job.post.topic,
+        kind: jobKind(job.kind),
+        status: job.status === "running" ? "running" : "queued",
+      })),
+    };
+  }
+
+  async removeQueued(jobId: string): Promise<{ ok: true }> {
+    const job = await this.prisma.generationJob.findUnique({
+      where: { id: jobId },
+      include: { post: true },
+    });
+    if (!job) throw new NotFoundException("джоба не найдена");
+    if (job.status !== "queued") throw new ConflictException("задание уже выполняется");
+    this.imageSeeds.delete(jobId);
+    if (job.post.status === "draft" && job.kind === "full") {
+      await this.prisma.post.delete({ where: { id: job.postId } });
+    } else {
+      await this.prisma.generationJob.delete({ where: { id: jobId } });
+    }
+    this.hub.publish(jobId, { event: "cancelled", data: { message: "убрано из очереди" } });
+    this.hub.close(jobId);
+    await this.abortCooldownIfIdle();
+    return { ok: true };
   }
 
   async cancel(jobId: string): Promise<{ jobId: string; status: "cancelled" }> {
@@ -119,32 +187,168 @@ export class GenerateService {
     const end = () => {
       if (!res.writableEnded) res.end();
     };
-    if (!this.hub.has(id)) {
-      if (job.status === "succeeded") {
-        write({ event: "status", data: { phase: "done", job_id: id } });
-      } else if (job.status === "cancelled") {
-        write({ event: "cancelled", data: { message: job.error ?? "отменено" } });
-      } else {
-        write({ event: "error", data: { message: job.error ?? "джоба прервана" } });
-      }
+    let joined = false;
+    const join = () => {
+      if (joined || res.writableEnded) return;
+      joined = true;
+      const unsubscribe = this.hub.subscribe(id, write, end);
+      res.on("close", unsubscribe);
+    };
+    if (job.status === "queued") {
+      write({ event: "status", data: { phase: "queued", job_id: id } });
+    }
+    if (this.hub.has(id)) {
+      join();
+      return;
+    }
+    if (job.status === "succeeded") {
+      write({ event: "status", data: { phase: "done", job_id: id } });
       end();
       return;
     }
-    const unsubscribe = this.hub.subscribe(id, write, end);
-    res.on("close", unsubscribe);
+    if (job.status === "cancelled") {
+      write({ event: "cancelled", data: { message: job.error ?? "отменено" } });
+      end();
+      return;
+    }
+    if (job.status !== "queued") {
+      write({ event: "error", data: { message: job.error ?? "джоба прервана" } });
+      end();
+      return;
+    }
+    const timer = setInterval(() => {
+      void this.followQueued(id, res, write, end, join, () => clearInterval(timer));
+    }, 400);
+    res.on("close", () => clearInterval(timer));
   }
 
   private readonly imageSeeds = new Map<string, number>();
 
-  private async launch(postId: string, kind: "full" | "text" | "image", imageSeed?: number) {
+  private async followQueued(
+    id: string,
+    res: Response,
+    write: (event: SseEvent) => void,
+    end: () => void,
+    join: () => void,
+    stop: () => void,
+  ): Promise<void> {
+    if (res.writableEnded) {
+      stop();
+      return;
+    }
+    if (this.hub.has(id)) {
+      stop();
+      join();
+      return;
+    }
+    const current = await this.prisma.generationJob.findUnique({ where: { id } });
+    if (current?.status === "queued" || current?.status === "running") return;
+    stop();
+    if (!current) {
+      write({ event: "cancelled", data: { message: "убрано из очереди" } });
+    } else if (current.status === "succeeded") {
+      write({ event: "status", data: { phase: "done", job_id: id } });
+    } else if (current.status === "cancelled") {
+      write({ event: "cancelled", data: { message: current.error ?? "отменено" } });
+    } else {
+      write({ event: "error", data: { message: current.error ?? "джоба прервана" } });
+    }
+    end();
+  }
+
+  private kick(): void {
+    if (this.pumping) return;
+    this.pumping = true;
+    void this.pump();
+  }
+
+  private async pump(): Promise<void> {
+    try {
+      for (;;) {
+        const job = await this.claimNext();
+        if (!job) return;
+        await this.run(job.id);
+        await this.pauseIfQueued();
+      }
+    } finally {
+      this.pumping = false;
+      const more = await this.prisma.generationJob.count({ where: { status: "queued" } });
+      if (more > 0) this.kick();
+    }
+  }
+
+  private async claimNext(): Promise<{ id: string } | null> {
+    for (;;) {
+      const job = await this.prisma.generationJob.findFirst({
+        where: { status: "queued" },
+        orderBy: { createdAt: "asc" },
+      });
+      if (!job) return null;
+      this.hub.open(job.id);
+      const claimed = await this.prisma.generationJob.updateMany({
+        where: { id: job.id, status: "queued" },
+        data: { status: "running" },
+      });
+      if (claimed.count === 1) return job;
+      this.hub.close(job.id);
+    }
+  }
+
+  private async enqueue(
+    postId: string,
+    kind: "full" | "text" | "image",
+    imageSeed?: number,
+  ): Promise<{ jobId: string; postId: string }> {
     const jobId = randomUUID();
     if (imageSeed !== undefined) this.imageSeeds.set(jobId, imageSeed);
     await this.prisma.generationJob.create({
-      data: { id: jobId, postId, kind, status: "running" },
+      data: { id: jobId, postId, kind, status: "queued" },
     });
     this.hub.open(jobId);
-    void this.run(jobId);
     return { jobId, postId };
+  }
+
+  private async pauseIfQueued(): Promise<void> {
+    const pending = await this.prisma.generationJob.count({ where: { status: "queued" } });
+    if (pending === 0) return;
+    await this.settleIfFree();
+    const still = await this.prisma.generationJob.count({ where: { status: "queued" } });
+    if (still === 0) return;
+    const until = Date.now() + COOLDOWN_MS;
+    this.cooldownUntil = new Date(until).toISOString();
+    const abort = new AbortController();
+    this.cooldownAbort = abort;
+    try {
+      while (Date.now() < until) {
+        if (abort.signal.aborted) return;
+        const left = await this.prisma.generationJob.count({ where: { status: "queued" } });
+        if (left === 0) return;
+        await delay(Math.min(1000, until - Date.now()), abort.signal);
+      }
+    } finally {
+      this.cooldownUntil = null;
+      if (this.cooldownAbort === abort) this.cooldownAbort = null;
+    }
+  }
+
+  private async abortCooldownIfIdle(): Promise<void> {
+    const left = await this.prisma.generationJob.count({ where: { status: "queued" } });
+    if (left === 0) this.cooldownAbort?.abort();
+  }
+
+  private async settleIfFree(): Promise<void> {
+    try {
+      const status = await this.python.gpuStatus();
+      if (status.locked) {
+        this.logger.warn("gpu settle skipped: lock held");
+        return;
+      }
+      const settled = await this.python.settleGpu();
+      if (settled.skipped) this.logger.warn("gpu settle skipped by AI service");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "gpu settle failed";
+      this.logger.warn(`gpu settle failed: ${message}`);
+    }
   }
 
   private async run(jobId: string): Promise<void> {
@@ -380,10 +584,10 @@ export class GenerateService {
   }
 
   private async ensureIdle(postId: string): Promise<void> {
-    const running = await this.prisma.generationJob.count({
-      where: { postId, status: "running" },
+    const active = await this.prisma.generationJob.count({
+      where: { postId, status: { in: ["queued", "running"] } },
     });
-    if (running > 0) throw new ConflictException("генерация уже идёт");
+    if (active > 0) throw new ConflictException("генерация уже идёт");
   }
 
   private async requirePost(id: string): Promise<Post> {
@@ -420,6 +624,29 @@ export class GenerateService {
       throw new Error("файл картинки не найден");
     }
   }
+}
+
+function jobKind(kind: string): "full" | "text" | "image" {
+  if (kind === "text" || kind === "image") return kind;
+  return "full";
+}
+
+function delay(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted || ms <= 0) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+  });
 }
 
 function streamPath(kind: string): string {
