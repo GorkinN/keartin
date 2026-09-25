@@ -2,7 +2,7 @@
 
 Факт после этапа 7 (2026-09-24, ждёт приёмки). Векторы книг живут в Qdrant (`library_chunks`). Эмбеды `BAAI/bge-m3` считаются на **CPU** через `sentence-transformers`, не через Ollama и не через GpuManager. Библиотека в UI ходит в Nest `:3000`: загрузка, прогресс `chunksDone/chunksTotal`, удаление. Nest проксирует индекс и удаление векторов в FastAPI.
 
-Ошибки файла на книге короткие и русские: неподдерживаемый формат, не удалось прочитать, нет текста (скан без слоя), не нарезались фрагменты. Сырой стек в `book.error` не пишется.
+Ошибки файла на книге короткие и русские: неподдерживаемый формат, не удалось прочитать, нет текста, распознавание скана не нашло текста, модель OCR не скачана, не нарезались фрагменты. Сырой стек в `book.error` не пишется.
 
 ## Кэш Hugging Face
 
@@ -26,7 +26,18 @@
 | DOCX | python-docx | абзацы и таблицы |
 | TXT | charset-normalizer | декод в Unicode |
 
-Скан PDF без текстового слоя (только картинки, типичный вывод FineReader) → джоба `error`, сервис жив. OCR на этом этапе нет.
+## Сканы PDF (OCR)
+
+PDF без текстового слоя (только картинки, типичный вывод FineReader) распознаётся локальной `deepseek-community/DeepSeek-OCR-2` (`OCR_MODEL_ID`). Это нативная модель `transformers` (`AutoModelForImageTextToText`), без `trust_remote_code` и без понижения версий. Веса только из HF-кэша: `.\scripts\download-ocr.ps1`.
+
+1. PyMuPDF читает текстовый слой. Текст есть — OCR не запускается.
+2. Слоя нет, а рядом лежит `source.txt` — индексируется он, OCR не повторяется.
+3. Иначе `GpuManager.acquire("ocr")` на всю книгу. PyMuPDF рендерит страницу (`OCR_DPI`, дефолт 144), модель распознаёт её промптом `Free OCR.` Страницы строго по одной, склейка пустой строкой.
+4. Текст UTF-8 пишется рядом с PDF: `library/<id>/source.pdf` → `library/<id>/source.txt`. Дальше обычный чанкинг и CPU-эмбеды.
+
+На S3 Python пишет `source.txt` в staging `data/tmp/index/<id>/`, Nest перед очисткой staging кладёт его в ключ `library/<id>/source.txt`. При переиндексации Nest кладёт сохранённый `source.txt` обратно в staging. В `Book.textKey` — ключ сайдкара, если он есть.
+
+Распознавание не нашло текста → книга `error`. Нет весов → книга `error` «модель не скачана».
 
 ## Чанки и поиск
 
@@ -40,7 +51,7 @@
 
 `POST /rag/index` — `{ "path", "book_id"?, "source_name"? }` → `202` `{ job_id, book_id, status }`. Файл должен существовать. Нет `book_id` — UUID. Джобы в памяти процесса (рестарт FastAPI их стирает; векторы в Qdrant остаются). Одна книга за раз.
 
-`GET /rag/index/{job_id}` — `queued | indexing | ready | error`, плюс `chunks_done` / `chunks_total`.
+`GET /rag/index/{job_id}` — `queued | indexing | ready | error`, плюс `chunks_done` / `chunks_total`, `phase` (`parse | ocr | embed`) и `pages_done` / `pages_total` для OCR. Nest пишет их в `Book.phase` / `pagesDone` / `pagesTotal`, библиотека показывает «страница N/M».
 
 `POST /rag/search` — `{ "query", "book_ids": [], "top_k"? }` → `{ hits: [{ book_id, chunk_index, source_name, lang, text, score }] }`.
 
@@ -50,4 +61,6 @@
 
 ## GPU
 
-Индексация lock GpuManager не берёт: `device="cpu"`. Не гонять индекс параллельно с Flux без нужды (оба трогают torch/RAM).
+Эмбеды lock GpuManager не берут: `device="cpu"`. Не гонять индекс параллельно с Flux без нужды (оба трогают torch/RAM).
+
+OCR скана берёт тенант `ocr` на всю книгу (~10 с на страницу). Генерация поста в это время ждёт тот же lock, UI показывает «GPU занят: распознавание скана». Другие книги ждут индексный lock.

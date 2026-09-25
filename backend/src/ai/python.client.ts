@@ -31,6 +31,9 @@ export type IndexStatus = {
   source_name: string;
   chunks_total: number;
   chunks_done: number;
+  phase: string;
+  pages_total: number;
+  pages_done: number;
   error: string | null;
 };
 

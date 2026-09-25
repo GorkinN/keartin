@@ -12,5 +12,6 @@ export function parseSeed(text: string): { value?: number; error: string | null 
 export function gpuBusyLabel(status: { locked: boolean; tenant: string | null } | undefined): string | null {
   if (!status?.locked) return null;
   if (status.tenant === "llm" || status.tenant === "flux") return `GPU занят: ${status.tenant}`;
+  if (status.tenant === "ocr") return "GPU занят: распознавание скана";
   return "GPU занят";
 }

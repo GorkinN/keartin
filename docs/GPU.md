@@ -1,6 +1,10 @@
 # GPU
 
-Факт после этапа 7 (2026-09-24, ждёт приёмки). Владелец GPU — процесс FastAPI. Один `GpuManager`, один `asyncio.Lock`. Тенанты: `llm` | `flux`. Не `taskkill` Ollama. Flux не в Docker и не через ComfyUI.
+Факт после этапа 7 (2026-09-24, ждёт приёмки). Владелец GPU — процесс FastAPI. Один `GpuManager`, один `asyncio.Lock`. Тенанты: `llm` | `flux` | `ocr`. Не `taskkill` Ollama. Flux не в Docker и не через ComfyUI.
+
+## OCR
+
+Тенант `ocr` — DeepSeek-OCR-2 (~3B, bf16) для сканов PDF. Acquire: выгрузить Flux, все модели Ollama, дождаться VRAM. Release: `to("cpu")`, `del`, `gc.collect()`, `empty_cache()`, снова ждать VRAM. `acquire("llm")` и `acquire("flux")` выгружают OCR, если она осталась в памяти. Lock держится на всю книгу; UI показывает «GPU занят: распознавание скана».
 
 `GET /gpu/status` (FastAPI и тот же путь на Nest): `locked`, `tenant`, `ollama_models`, `vram_used_mb`. Второй generate не получает `409`: он ждёт этот lock, два Flux сразу не стартуют. UI опрашивает Nest раз в 2 с и выключает кнопки, пока `locked`, с подписью «GPU занят: llm» или «GPU занят: flux».
 

@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import type { Book } from "@prisma/client";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { PythonClient, PythonRequestError } from "../ai/python.client";
@@ -129,6 +129,9 @@ export class LibraryService {
         error: null,
         chunksDone: 0,
         chunksTotal: 0,
+        phase: "",
+        pagesDone: 0,
+        pagesTotal: 0,
       },
     });
     await this.writeMeta(indexing);
@@ -178,22 +181,31 @@ export class LibraryService {
       }
       const book = await this.prisma.book.findUnique({ where: { id: bookId } });
       if (!book || book.indexJobId !== jobId) return;
-      if (status.status === "ready") {
-        await this.finish(bookId, "ready", null, status);
+      if (status.status === "ready" || status.status === "error") {
+        await this.syncText(book);
+        if (status.status === "ready") {
+          await this.finish(bookId, "ready", null, status);
+        } else {
+          await this.finish(bookId, "error", status.error ?? "ошибка индексации", status);
+        }
         await this.removeStage(bookId);
         return;
       }
-      if (status.status === "error") {
-        await this.finish(bookId, "error", status.error ?? "ошибка индексации", status);
-        await this.removeStage(bookId);
-        return;
-      }
-      if (book.chunksDone !== status.chunks_done || book.chunksTotal !== status.chunks_total) {
+      if (
+        book.chunksDone !== status.chunks_done ||
+        book.chunksTotal !== status.chunks_total ||
+        book.phase !== status.phase ||
+        book.pagesDone !== status.pages_done ||
+        book.pagesTotal !== status.pages_total
+      ) {
         await this.prisma.book.update({
           where: { id: bookId },
           data: {
             chunksDone: status.chunks_done,
             chunksTotal: status.chunks_total,
+            phase: status.phase,
+            pagesDone: status.pages_done,
+            pagesTotal: status.pages_total,
           },
         });
       }
@@ -204,7 +216,12 @@ export class LibraryService {
     bookId: string,
     status: "ready" | "error",
     error: string | null,
-    index: { chunks_done: number; chunks_total: number } | null,
+    index: {
+      chunks_done: number;
+      chunks_total: number;
+      pages_done?: number;
+      pages_total?: number;
+    } | null,
   ): Promise<void> {
     const book = await this.prisma.book.findUnique({ where: { id: bookId } });
     if (!book) return;
@@ -213,8 +230,11 @@ export class LibraryService {
       data: {
         status,
         error,
+        phase: "",
         chunksDone: index?.chunks_done ?? book.chunksDone,
         chunksTotal: index?.chunks_total ?? book.chunksTotal,
+        pagesDone: index?.pages_done ?? book.pagesDone,
+        pagesTotal: index?.pages_total ?? book.pagesTotal,
       },
     });
     await this.writeMeta(updated);
@@ -230,15 +250,48 @@ export class LibraryService {
     } catch {
       throw new BadRequestException("файл книги не найден");
     }
-    const dir = join(this.env.repoRoot, "data", "tmp", "index", bookId);
+    const dir = this.stageDir(bookId);
     await mkdir(dir, { recursive: true });
     const file = join(dir, basename(storageKey));
     await writeFile(file, bytes);
+    const textKey = sidecarKey(storageKey);
+    if (textKey) {
+      try {
+        await writeFile(join(dir, basename(textKey)), await this.storage.getBytes(textKey));
+      } catch {
+        // No recognized text yet: the indexer will OCR the scan if needed.
+      }
+    }
     return file;
   }
 
+  /** Python writes source.txt next to the indexed PDF; persist it next to the original. */
+  private async syncText(book: Book): Promise<void> {
+    const textKey = sidecarKey(book.storageKey);
+    if (!textKey) return;
+    let found = false;
+    const direct = this.storage.absolutePath(textKey);
+    if (direct) {
+      found = await isFile(direct);
+    } else {
+      const staged = join(this.stageDir(book.id), basename(textKey));
+      if (await isFile(staged)) {
+        await this.storage.putBytes(textKey, await readFile(staged));
+        found = true;
+      }
+    }
+    const next = found ? textKey : null;
+    if (book.textKey !== next) {
+      await this.prisma.book.update({ where: { id: book.id }, data: { textKey: next } });
+    }
+  }
+
+  private stageDir(bookId: string): string {
+    return join(this.env.repoRoot, "data", "tmp", "index", bookId);
+  }
+
   private async removeStage(bookId: string): Promise<void> {
-    await rm(join(this.env.repoRoot, "data", "tmp", "index", bookId), {
+    await rm(this.stageDir(bookId), {
       recursive: true,
       force: true,
     });
@@ -276,6 +329,18 @@ function mapPython(error: unknown): HttpException {
   }
   if (error instanceof HttpException) return error;
   return new HttpException("AI-сервис недоступен", 502);
+}
+
+function sidecarKey(storageKey: string): string | null {
+  return storageKey.endsWith(".pdf") ? `${storageKey.slice(0, -".pdf".length)}.txt` : null;
+}
+
+async function isFile(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function sleep(ms: number): Promise<void> {

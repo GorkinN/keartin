@@ -57,12 +57,12 @@ def test_empty_pdf_raises(tmp_path: Path) -> None:
     import pymupdf
     import pytest
 
-    from app.rag.errors import RagError
+    from app.rag.errors import EmptyTextError
 
     path = tmp_path / "empty.pdf"
     doc = pymupdf.open()
     doc.new_page()
     doc.save(path)
     doc.close()
-    with pytest.raises(RagError, match="empty"):
+    with pytest.raises(EmptyTextError, match="empty"):
         parse_file(path)

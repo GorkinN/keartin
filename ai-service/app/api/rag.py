@@ -35,6 +35,9 @@ class IndexStatus(BaseModel):
     source_name: str
     chunks_total: int
     chunks_done: int
+    phase: str
+    pages_total: int
+    pages_done: int
     error: str | None = None
 
 

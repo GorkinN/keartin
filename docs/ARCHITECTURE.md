@@ -78,7 +78,7 @@
 
 ## GPU
 
-`ai-service/app/gpu/manager.py`: один `asyncio.Lock`. Тенанты `llm` | `flux`. Эмбеды `bge-m3` — CPU, lock для индексации не нужен (этап 3).
+`ai-service/app/gpu/manager.py`: один `asyncio.Lock`. Тенанты `llm` | `flux` | `ocr`. Захват `flux` или `ocr` выгружает Ollama и другую torch-модель; release выгружает свою. Эмбеды `bge-m3` — CPU, lock для них не нужен.
 
 Любой вызов Ollama в обход GpuManager — баг. Правило в `.cursorrules`.
 
@@ -103,7 +103,7 @@ TRANSFORMERS_CACHE=D:/huggingface_cache/transformers
 - `DELETE /rag/books/{book_id}` — только векторы.
 - Payload чанка: `book_id`, `chunk_index`, `source_name`, `lang`, `text`. Cosine 1024.
 - Эмбеды на CPU, GpuManager не трогаем. Одна индексная джоба за раз (свой lock, не GPU).
-- Скан PDF без текстового слоя → `error` по книге, не падение сервиса.
+- Скан PDF без текстового слоя → OCR DeepSeek-OCR-2 под тенантом `ocr`, текст в `library/<id>/source.txt` рядом с `source.pdf`, дальше обычная индексация. Готовый `source.txt` переиспользуется.
 
 Подробности: [RAG.md](RAG.md).
 

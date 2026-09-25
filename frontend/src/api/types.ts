@@ -8,6 +8,10 @@ export type Book = {
   error: string | null;
   chunksTotal: number;
   chunksDone: number;
+  phase: string;
+  pagesTotal: number;
+  pagesDone: number;
+  textKey: string | null;
   createdAt: string;
   updatedAt: string;
 };

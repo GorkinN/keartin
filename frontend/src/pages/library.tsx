@@ -80,15 +80,25 @@ export function LibraryPage() {
       ) : null}
       <div className="space-y-3">
         {books.data?.map((book) => {
-          const percent = book.chunksTotal > 0 ? (book.chunksDone / book.chunksTotal) * 100 : 0;
+          const ocr = book.status === "indexing" && book.phase === "ocr";
+          const percent = ocr
+            ? book.pagesTotal > 0
+              ? (book.pagesDone / book.pagesTotal) * 100
+              : 0
+            : book.chunksTotal > 0
+              ? (book.chunksDone / book.chunksTotal) * 100
+              : 0;
+          const showProgress = book.status === "indexing" && (ocr ? book.pagesTotal > 0 : book.chunksTotal > 0);
           return (
             <Card key={book.id}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 space-y-1">
                   <p className="truncate font-medium">{book.filename}</p>
                   <p className="text-sm text-muted-foreground">
-                    {book.format} · {bookStatusLabel(book.status)}
-                    {book.chunksTotal > 0 ? ` · ${book.chunksDone}/${book.chunksTotal}` : ""}
+                    {book.format} · {ocr ? "распознавание скана" : bookStatusLabel(book.status)}
+                    {ocr && book.pagesTotal > 0 ? ` · страница ${book.pagesDone}/${book.pagesTotal}` : ""}
+                    {!ocr && book.chunksTotal > 0 ? ` · ${book.chunksDone}/${book.chunksTotal}` : ""}
+                    {book.textKey && !ocr ? " · текст распознан" : ""}
                   </p>
                 </div>
                 <div className="flex gap-2">
@@ -106,7 +116,7 @@ export function LibraryPage() {
                   </Button>
                 </div>
               </div>
-              {book.status === "indexing" && book.chunksTotal > 0 ? <Progress value={percent} /> : null}
+              {showProgress ? <Progress value={percent} /> : null}
               {book.error ? <p className="text-sm text-destructive">{book.error}</p> : null}
             </Card>
           );

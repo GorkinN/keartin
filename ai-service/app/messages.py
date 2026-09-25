@@ -5,7 +5,10 @@ OLLAMA_DOWN = "Ollama недоступна. Запустите её и повт�
 VRAM_BUSY = "Видеопамять не освободилась. Подождите и повторите."
 EMPTY_RAG = "В выбранных книгах нет подходящих фрагментов."
 BAD_FILE = "Не удалось прочитать файл."
-EMPTY_FILE = "В файле нет текста. Сканы без текстового слоя не поддерживаются."
+EMPTY_FILE = "В файле нет текста."
+EMPTY_OCR = "Распознавание скана не нашло текста."
+OCR_MISSING = "Модель распознавания сканов не скачана. Запустите scripts/download-ocr.ps1."
+OCR_NO_CUDA = "Для распознавания скана нужна видеокарта CUDA."
 BAD_FORMAT = "Формат файла не поддерживается."
 NO_CHUNKS = "Из файла не получилось нарезать фрагменты."
 INDEX_FAILED = "Не удалось проиндексировать книгу."
@@ -29,6 +32,12 @@ def public_message(exc: BaseException) -> str:
         return BAD_FILE
     if lowered.startswith("parsed text is empty"):
         return EMPTY_FILE
+    if lowered.startswith("ocr produced no text"):
+        return EMPTY_OCR
+    if lowered.startswith("ocr weights for"):
+        return OCR_MISSING
+    if lowered.startswith("cuda is unavailable for ocr"):
+        return OCR_NO_CUDA
     if lowered.startswith("no chunks"):
         return NO_CHUNKS
     if lowered.startswith("indexing failed"):

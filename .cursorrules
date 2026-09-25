@@ -11,9 +11,9 @@
 
 ## GPU
 
-- One `GpuManager` in FastAPI. One lock. Tenants: `llm` | `flux` (and `embed` only if embeddings ever move to GPU/Ollama).
+- One `GpuManager` in FastAPI. One lock. Tenants: `llm` | `flux` | `ocr` (and `embed` only if embeddings ever move to GPU/Ollama).
 - Any Ollama call that bypasses GpuManager is a bug. Do not `taskkill` Ollama.
-- Do not load Flux and the LLM into VRAM at the same time.
+- Do not load Flux, the LLM, or the OCR model into VRAM at the same time.
 - Do not put Flux in Docker. Do not add ComfyUI.
 
 ## Scope

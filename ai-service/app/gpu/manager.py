@@ -12,25 +12,29 @@ from app.settings import Settings
 
 logger = logging.getLogger(__name__)
 
+TENANTS = {"llm", "flux", "ocr"}
 
-class FluxHolder(Protocol):
+
+class ModelHolder(Protocol):
     @property
     def loaded(self) -> bool: ...
 
     def unload(self) -> None: ...
 
-
 class GpuManager:
-    """Exclusive GPU lock. Tenants: llm | flux. Never taskkill Ollama."""
+    """Exclusive GPU lock. Tenants: llm | flux | ocr. Never taskkill Ollama."""
 
     def __init__(self, settings: Settings) -> None:
         self._lock = asyncio.Lock()
         self._tenant: Optional[str] = None
         self._settings = settings
-        self._flux: FluxHolder | None = None
+        self._holders: dict[str, ModelHolder] = {}
 
-    def attach_flux(self, flux: FluxHolder) -> None:
-        self._flux = flux
+    def attach_flux(self, flux: ModelHolder) -> None:
+        self._holders["flux"] = flux
+
+    def attach_ocr(self, ocr: ModelHolder) -> None:
+        self._holders["ocr"] = ocr
 
     @property
     def tenant(self) -> Optional[str]:
@@ -41,14 +45,15 @@ class GpuManager:
         return self._lock.locked()
 
     async def acquire(self, tenant: str) -> None:
-        if tenant not in {"llm", "flux"}:
+        if tenant not in TENANTS:
             raise GpuError(f"Unknown GPU tenant: {tenant}", status_code=500)
         await self._lock.acquire()
         try:
-            if tenant == "llm":
-                await self._ensure_flux_unloaded()
-            else:
-                logger.info("gpu acquire flux: unload LLM before Flux")
+            for name in self._holders:
+                if name != tenant:
+                    await self._ensure_unloaded(name)
+            if tenant != "llm":
+                logger.info("gpu acquire %s: unload LLM first", tenant)
                 await unload_ollama(OllamaClient(self._settings))
                 await wait_vram_released(self._settings.gpu_free_mb_threshold)
             self._tenant = tenant
@@ -60,9 +65,9 @@ class GpuManager:
     async def release(self) -> None:
         error: Exception | None = None
         try:
-            if self._tenant == "flux":
-                logger.info("gpu release flux: unload Flux")
-                await self._ensure_flux_unloaded()
+            if self._tenant in self._holders:
+                logger.info("gpu release %s: unload", self._tenant)
+                await self._ensure_unloaded(self._tenant)
                 await wait_vram_released(self._settings.gpu_free_mb_threshold)
         except Exception as exc:
             error = exc
@@ -75,9 +80,9 @@ class GpuManager:
         if error:
             raise error
 
-    async def _ensure_flux_unloaded(self) -> None:
-        flux = self._flux
-        if flux is None or not flux.loaded:
+    async def _ensure_unloaded(self, name: str) -> None:
+        holder = self._holders.get(name)
+        if holder is None or not holder.loaded:
             return
-        await asyncio.to_thread(flux.unload)
+        await asyncio.to_thread(holder.unload)
         await wait_vram_released(self._settings.gpu_free_mb_threshold)

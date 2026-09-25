@@ -9,6 +9,8 @@ from app.api.pipeline import router as pipeline_router
 from app.api.rag import router as rag_router
 from app.gpu.manager import GpuManager
 from app.image.flux_pipeline import FluxPipelineHolder
+from app.ocr.deepseek import DeepseekOcrHolder
+from app.ocr.runner import ScanOcr
 from app.rag.embedder import Embedder
 from app.rag.indexer import Indexer
 from app.rag.jobs import JobStore
@@ -21,10 +23,12 @@ settings = get_settings()
 gpu = GpuManager(settings)
 flux = FluxPipelineHolder(settings)
 gpu.attach_flux(flux)
+ocr = DeepseekOcrHolder(settings)
+gpu.attach_ocr(ocr)
 embedder = Embedder(settings)
 qdrant = QdrantStore(settings)
 rag_jobs = JobStore()
-indexer = Indexer(settings, embedder, qdrant, rag_jobs)
+indexer = Indexer(settings, embedder, qdrant, rag_jobs, ocr=ScanOcr(settings, gpu, ocr))
 retriever = Retriever(settings, embedder, qdrant)
 
 app = FastAPI(title="llm-keartin AI service", version="0.1.0")

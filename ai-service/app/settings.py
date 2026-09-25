@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     flux_model_id: str = "black-forest-labs/FLUX.1-dev"
     flux_quant: str = "nf4"
     flux_model_path: str = ""
+    ocr_model_id: str = "deepseek-community/DeepSeek-OCR-2"
+    ocr_dpi: int = 144
+    ocr_max_patches: int = 6
+    ocr_max_new_tokens: int = 4096
 
     @field_validator("flux_quant")
     @classmethod

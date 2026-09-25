@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.rag.errors import RagError
+from app.rag.errors import EmptyTextError, RagError
 from app.rag.parsers.docx import parse_docx
 from app.rag.parsers.epub import parse_epub
 from app.rag.parsers.fb2 import parse_fb2
@@ -37,17 +37,13 @@ def parse_file(path: str | Path) -> ParsedDocument:
         raise
     except Exception as exc:
         raise RagError(f"Failed to parse {file_path.name}: {exc}", status_code=400) from exc
-    normalized = _normalize_text(text)
+    normalized = normalize_text(text)
     if not normalized:
-        raise RagError(
-            f"Parsed text is empty: {file_path.name}. "
-            "Scanned PDFs without a text layer are not supported.",
-            status_code=400,
-        )
+        raise EmptyTextError(f"Parsed text is empty: {file_path.name}", status_code=400)
     return ParsedDocument(text=normalized, source_name=file_path.name)
 
 
-def _normalize_text(text: str) -> str:
+def normalize_text(text: str) -> str:
     lines = [line.strip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
     collapsed: list[str] = []
     blank = False

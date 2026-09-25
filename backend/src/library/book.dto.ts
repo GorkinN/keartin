@@ -10,6 +10,10 @@ export type BookDto = {
   error: string | null;
   chunksTotal: number;
   chunksDone: number;
+  phase: string;
+  pagesTotal: number;
+  pagesDone: number;
+  textKey: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -25,6 +29,10 @@ export function toBookDto(book: Book): BookDto {
     error: book.error,
     chunksTotal: book.chunksTotal,
     chunksDone: book.chunksDone,
+    phase: book.phase,
+    pagesTotal: book.pagesTotal,
+    pagesDone: book.pagesDone,
+    textKey: book.textKey,
     createdAt: book.createdAt.toISOString(),
     updatedAt: book.updatedAt.toISOString(),
   };
@@ -37,10 +45,12 @@ export function bookMeta(book: Book): string {
       filename: book.filename,
       format: book.format,
       storageKey: book.storageKey,
+      textKey: book.textKey,
       status: book.status,
       error: book.error,
       chunksTotal: book.chunksTotal,
       chunksDone: book.chunksDone,
+      pagesTotal: book.pagesTotal,
       updatedAt: book.updatedAt.toISOString(),
     },
     null,
