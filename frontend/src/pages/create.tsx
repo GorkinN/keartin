@@ -32,6 +32,7 @@ const modes: KnowledgeMode[] = ["rag", "rag_plus", "general"];
 export function CreatePage() {
   const [step, setStep] = useState("sources");
   const [bookIds, setBookIds] = useState<string[]>([]);
+  const [sourceQuery, setSourceQuery] = useState("");
   const [topic, setTopic] = useState("");
   const [tone, setTone] = useState("");
   const [length, setLength] = useState<PostLength>("M");
@@ -85,6 +86,11 @@ export function CreatePage() {
   });
 
   const readyBooks = (books.data ?? []).filter((book) => book.status === "ready");
+  const sourceNeedle = sourceQuery.trim().toLowerCase();
+  const visibleBooks = sourceNeedle
+    ? readyBooks.filter((book) => book.filename.toLowerCase().includes(sourceNeedle))
+    : readyBooks;
+  const visibleIds = visibleBooks.map((book) => book.id);
   const size = resolveSize(sizePreset, customWidth, customHeight);
   const sizeError = "error" in size ? size.error : null;
   const seed = parseSeed(seedText);
@@ -149,6 +155,15 @@ export function CreatePage() {
     setBookIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   };
 
+  const selectVisibleBooks = () => {
+    setBookIds((current) => [...new Set([...current, ...visibleIds])]);
+  };
+
+  const resetVisibleBooks = () => {
+    const visible = new Set(visibleIds);
+    setBookIds((current) => current.filter((id) => !visible.has(id)));
+  };
+
   const generate = () => {
     if (blocked || "error" in size || selectedCount === null || adding) return;
     setEnqueueError(null);
@@ -203,17 +218,48 @@ export function CreatePage() {
                 Нет готовых книг. Загрузите материал в библиотеке и дождитесь статуса «готово».
               </p>
             ) : (
-              readyBooks.map((book) => (
-                <label key={book.id} className="flex items-center gap-3 text-sm">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={bookIds.includes(book.id)}
-                    onChange={() => toggleBook(book.id)}
-                  />
-                  <span>{book.filename}</span>
-                </label>
-              ))
+              <>
+                <Input
+                  value={sourceQuery}
+                  onChange={(event) => setSourceQuery(event.target.value)}
+                  placeholder="Фильтр по названию"
+                  aria-label="Фильтр по названию"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!visibleIds.some((id) => !bookIds.includes(id))}
+                    onClick={selectVisibleBooks}
+                  >
+                    Выбрать всё
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!visibleIds.some((id) => bookIds.includes(id))}
+                    onClick={resetVisibleBooks}
+                  >
+                    Сбросить всё
+                  </Button>
+                </div>
+                {visibleBooks.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Ничего не найдено.</p>
+                ) : (
+                  visibleBooks.map((book) => (
+                    <label key={book.id} className="flex cursor-pointer items-center gap-3 text-sm">
+                      <Switch
+                        checked={bookIds.includes(book.id)}
+                        onCheckedChange={() => toggleBook(book.id)}
+                        aria-label={book.filename}
+                      />
+                      <span>{book.filename}</span>
+                    </label>
+                  ))
+                )}
+              </>
             )}
             <Button type="button" variant="outline" onClick={() => setStep("params")}>
               Далее
