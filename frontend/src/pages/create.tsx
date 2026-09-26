@@ -16,6 +16,7 @@ import type {
   Preset,
 } from "@/api/types";
 import { ErrorText } from "@/components/error-text";
+import { FieldHint, FieldLabel } from "@/components/field-hint";
 import { PostPreview } from "@/components/post-preview";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,6 +33,7 @@ const modes: KnowledgeMode[] = ["rag", "rag_plus", "general"];
 export function CreatePage() {
   const [step, setStep] = useState("sources");
   const [bookIds, setBookIds] = useState<string[]>([]);
+  const [sourceQuery, setSourceQuery] = useState("");
   const [topic, setTopic] = useState("");
   const [tone, setTone] = useState("");
   const [length, setLength] = useState<PostLength>("M");
@@ -85,6 +87,11 @@ export function CreatePage() {
   });
 
   const readyBooks = (books.data ?? []).filter((book) => book.status === "ready");
+  const sourceNeedle = sourceQuery.trim().toLowerCase();
+  const visibleBooks = sourceNeedle
+    ? readyBooks.filter((book) => book.filename.toLowerCase().includes(sourceNeedle))
+    : readyBooks;
+  const visibleIds = visibleBooks.map((book) => book.id);
   const size = resolveSize(sizePreset, customWidth, customHeight);
   const sizeError = "error" in size ? size.error : null;
   const seed = parseSeed(seedText);
@@ -149,6 +156,15 @@ export function CreatePage() {
     setBookIds((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   };
 
+  const selectVisibleBooks = () => {
+    setBookIds((current) => [...new Set([...current, ...visibleIds])]);
+  };
+
+  const resetVisibleBooks = () => {
+    const visible = new Set(visibleIds);
+    setBookIds((current) => current.filter((id) => !visible.has(id)));
+  };
+
   const generate = () => {
     if (blocked || "error" in size || selectedCount === null || adding) return;
     setEnqueueError(null);
@@ -198,22 +214,57 @@ export function CreatePage() {
         </TabsList>
         <TabsContent value="sources">
           <div className="space-y-3">
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-medium">Книги</span>
+              <FieldHint text="Нужны режимам «только книги» и «книги и общие знания»." />
+            </div>
             {readyBooks.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 Нет готовых книг. Загрузите материал в библиотеке и дождитесь статуса «готово».
               </p>
             ) : (
-              readyBooks.map((book) => (
-                <label key={book.id} className="flex items-center gap-3 text-sm">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={bookIds.includes(book.id)}
-                    onChange={() => toggleBook(book.id)}
-                  />
-                  <span>{book.filename}</span>
-                </label>
-              ))
+              <>
+                <Input
+                  value={sourceQuery}
+                  onChange={(event) => setSourceQuery(event.target.value)}
+                  placeholder="Фильтр по названию"
+                  aria-label="Фильтр по названию"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!visibleIds.some((id) => !bookIds.includes(id))}
+                    onClick={selectVisibleBooks}
+                  >
+                    Выбрать всё
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!visibleIds.some((id) => bookIds.includes(id))}
+                    onClick={resetVisibleBooks}
+                  >
+                    Сбросить всё
+                  </Button>
+                </div>
+                {visibleBooks.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Ничего не найдено.</p>
+                ) : (
+                  visibleBooks.map((book) => (
+                    <label key={book.id} className="flex cursor-pointer items-center gap-3 text-sm">
+                      <Switch
+                        checked={bookIds.includes(book.id)}
+                        onCheckedChange={() => toggleBook(book.id)}
+                        aria-label={book.filename}
+                      />
+                      <span>{book.filename}</span>
+                    </label>
+                  ))
+                )}
+              </>
             )}
             <Button type="button" variant="outline" onClick={() => setStep("params")}>
               Далее
@@ -223,11 +274,15 @@ export function CreatePage() {
         <TabsContent value="params">
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="topic">Тема</Label>
+              <FieldLabel htmlFor="topic" hint="О чём писать пост.">
+                Тема
+              </FieldLabel>
               <Textarea id="topic" value={topic} onChange={(event) => setTopic(event.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="tone">Тон</Label>
+              <FieldLabel htmlFor="tone" hint="Как звучит текст. Пустое поле даёт тон по умолчанию.">
+                Тон
+              </FieldLabel>
               <Input
                 id="tone"
                 value={tone}
@@ -237,7 +292,7 @@ export function CreatePage() {
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>Длина</Label>
+                <FieldLabel hint="Ориентир длины в символах: S, M или L.">Длина</FieldLabel>
                 <Select value={length} onValueChange={(value) => setLength(value as PostLength)}>
                   {lengths.map((item) => (
                     <SelectItem key={item} value={item}>
@@ -247,7 +302,9 @@ export function CreatePage() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label>Режим</Label>
+                <FieldLabel hint="Откуда брать факты: только выбранные книги, книги и общие знания или только общие знания.">
+                  Режим
+                </FieldLabel>
                 <Select value={knowledgeMode} onValueChange={(value) => setKnowledgeMode(value as KnowledgeMode)}>
                   {modes.map((item) => (
                     <SelectItem key={item} value={item}>
@@ -258,7 +315,9 @@ export function CreatePage() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label>Пресет стиля</Label>
+              <FieldLabel href="/presets?tab=text" hint="Описание и примеры текста уходят в промпт как стиль.">
+                Пресет стиля
+              </FieldLabel>
               <Select value={presetId} onValueChange={setPresetId}>
                 <SelectItem value="none">Без пресета</SelectItem>
                 {(presets.data ?? []).map((preset) => (
@@ -270,7 +329,9 @@ export function CreatePage() {
               {presets.isError ? <ErrorText message={errorMessage(presets.error)} /> : null}
             </div>
             <div className="space-y-1.5">
-              <Label>Стиль картинки</Label>
+              <FieldLabel href="/presets?tab=image" hint="Текст стиля учитывается при описании картинки.">
+                Стиль картинки
+              </FieldLabel>
               <Select value={imagePresetId} onValueChange={setImagePresetId}>
                 <SelectItem value="none">Без стиля</SelectItem>
                 {(imagePresets.data ?? []).map((preset) => (
@@ -282,14 +343,39 @@ export function CreatePage() {
               {imagePresets.isError ? <ErrorText message={errorMessage(imagePresets.error)} /> : null}
             </div>
             <div className="space-y-3">
-              <Toggle label="Эмодзи" checked={emoji} onCheckedChange={setEmoji} />
-              <Toggle label="Цитируемость" checked={citations} onCheckedChange={setCitations} />
-              <Toggle label="Хуки" checked={hooks} onCheckedChange={setHooks} />
-              <Toggle label="Тело" checked={includeBody} onCheckedChange={setIncludeBody} />
-              <Toggle label="CTA" checked={cta} onCheckedChange={setCta} />
+              <Toggle
+                label="Эмодзи"
+                hint="Можно немного эмодзи. Выключено — их не будет."
+                checked={emoji}
+                onCheckedChange={setEmoji}
+              />
+              <Toggle
+                label="Цитируемость"
+                hint="Можно называть книги из контекста. Выключено — названия в текст не попадают."
+                checked={citations}
+                onCheckedChange={setCitations}
+              />
+              <Toggle
+                label="Хуки"
+                hint="Первая фраза цепляет внимание."
+                checked={hooks}
+                onCheckedChange={setHooks}
+              />
+              <Toggle
+                label="Тело"
+                hint="Основной текст, который раскрывает тему."
+                checked={includeBody}
+                onCheckedChange={setIncludeBody}
+              />
+              <Toggle
+                label="CTA"
+                hint="В конце конкретный призыв к действию."
+                checked={cta}
+                onCheckedChange={setCta}
+              />
             </div>
             <div className="space-y-1.5">
-              <Label>Размер</Label>
+              <FieldLabel hint="Размер картинки.">Размер</FieldLabel>
               <Select value={sizePreset} onValueChange={(value) => setSizePreset(value as SizePresetId)}>
                 {SIZE_PRESETS.map((item) => (
                   <SelectItem key={item.id} value={item.id}>
@@ -323,7 +409,9 @@ export function CreatePage() {
               {sizePreset === "custom" ? <ErrorText message={sizeError} /> : null}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="seed">Seed картинки</Label>
+              <FieldLabel htmlFor="seed" hint="Фиксирует случайность картинки. Пусто — каждый раз новая.">
+                Seed картинки
+              </FieldLabel>
               <Input
                 id="seed"
                 inputMode="numeric"
@@ -334,7 +422,9 @@ export function CreatePage() {
               <ErrorText message={seed.error} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="count">Количество постов</Label>
+              <FieldLabel htmlFor="count" hint="Сколько постов с этими параметрами поставить в очередь.">
+                Количество постов
+              </FieldLabel>
               <div className="flex items-center gap-3">
                 <Input
                   id="count"
@@ -521,16 +611,21 @@ function formatCooldown(ms: number): string {
 
 function Toggle({
   label,
+  hint,
   checked,
   onCheckedChange,
 }: {
   label: string;
+  hint: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-4">
-      <span className="text-sm">{label}</span>
+      <span className="flex items-center gap-1.5 text-sm">
+        {label}
+        <FieldHint text={hint} />
+      </span>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </div>
   );
