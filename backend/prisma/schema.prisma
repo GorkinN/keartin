@@ -46,6 +46,14 @@ model ImagePromptPreset {
   posts     Post[]
 }
 
+model TonePreset {
+  id        String   @id @default(cuid())
+  name      String
+  text      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Post {
   id            String         @id @default(cuid())
   topic         String

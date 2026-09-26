@@ -64,6 +64,14 @@ export type ImagePromptPreset = {
   updatedAt: string;
 };
 
+export type TonePreset = {
+  id: string;
+  name: string;
+  text: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Preset = {
   id: string;
   name: string;

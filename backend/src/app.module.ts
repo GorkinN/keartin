@@ -6,6 +6,7 @@ import { HealthModule } from "./health/health.module";
 import { LibraryModule } from "./library/library.module";
 import { PostsModule } from "./posts/posts.module";
 import { PresetsModule } from "./presets/presets.module";
+import { TonePresetsModule } from "./tone-presets/tone-presets.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RecoveryService } from "./recovery.service";
 import { StorageModule } from "./storage/storage.module";
@@ -19,6 +20,7 @@ import { StorageModule } from "./storage/storage.module";
     LibraryModule,
     PresetsModule,
     ImagePresetsModule,
+    TonePresetsModule,
     GenerateModule,
     PostsModule,
   ],

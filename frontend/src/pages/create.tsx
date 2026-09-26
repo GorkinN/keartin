@@ -14,12 +14,14 @@ import type {
   Post,
   PostLength,
   Preset,
+  TonePreset,
 } from "@/api/types";
 import { BookOutline } from "@/components/book-outline";
 import { ErrorText } from "@/components/error-text";
 import { FieldHint, FieldLabel } from "@/components/field-hint";
 import { PostPreview } from "@/components/post-preview";
 import { Button } from "@/components/ui/button";
+import { Combobox } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectItem } from "@/components/ui/select";
@@ -75,6 +77,10 @@ export function CreatePage() {
   const imagePresets = useQuery({
     queryKey: ["image-presets"],
     queryFn: () => api<ImagePromptPreset[]>("/image-presets"),
+  });
+  const tonePresets = useQuery({
+    queryKey: ["tone-presets"],
+    queryFn: () => api<TonePreset[]>("/tone-presets"),
   });
   const gpu = useQuery({
     queryKey: ["gpu-status"],
@@ -294,15 +300,27 @@ export function CreatePage() {
               <Textarea id="topic" value={topic} onChange={(event) => setTopic(event.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <FieldLabel htmlFor="tone" hint="Как звучит текст. Пустое поле даёт тон по умолчанию.">
+              <FieldLabel
+                htmlFor="tone"
+                href="/presets?tab=tone"
+                hint="Можно выбрать пресет или написать свой. Пустое поле даёт тон по умолчанию."
+              >
                 Тон
               </FieldLabel>
-              <Input
+              <Combobox
                 id="tone"
                 value={tone}
                 placeholder="живой, разговорный"
-                onChange={(event) => setTone(event.target.value)}
+                maxLength={200}
+                listLabel="Пресеты тона"
+                options={(tonePresets.data ?? []).map((preset) => ({
+                  id: preset.id,
+                  label: preset.name,
+                  value: preset.text,
+                }))}
+                onValueChange={setTone}
               />
+              {tonePresets.isError ? <ErrorText message={errorMessage(tonePresets.error)} /> : null}
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">

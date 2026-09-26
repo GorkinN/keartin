@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
-import type { ImagePromptPreset, Preset } from "@/api/types";
+import type { ImagePromptPreset, Preset, TonePreset } from "@/api/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorText } from "@/components/error-text";
 import { FieldHint, FieldLabel } from "@/components/field-hint";
@@ -34,9 +34,14 @@ type Editor =
 
 const emptyDraft = (): Draft => ({ name: "", description: "", examples: [""] });
 
+function presetTab(value: string | null): "text" | "image" | "tone" {
+  if (value === "image" || value === "tone") return value;
+  return "text";
+}
+
 export function PresetsPage() {
   const [params, setParams] = useSearchParams();
-  const tab = params.get("tab") === "image" ? "image" : "text";
+  const tab = presetTab(params.get("tab"));
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Пресеты</h1>
@@ -49,12 +54,16 @@ export function PresetsPage() {
         <TabsList>
           <TabsTrigger value="text">Текст</TabsTrigger>
           <TabsTrigger value="image">Картинка</TabsTrigger>
+          <TabsTrigger value="tone">Тон</TabsTrigger>
         </TabsList>
         <TabsContent value="text">
           <TextPresets />
         </TabsContent>
         <TabsContent value="image">
           <ImagePresets />
+        </TabsContent>
+        <TabsContent value="tone">
+          <TonePresets />
         </TabsContent>
       </Tabs>
     </div>
@@ -415,6 +424,171 @@ function ImagePresets() {
         open={deleteTarget !== null}
         title="Удалить пресет?"
         description={deleteTarget ? `«${deleteTarget.name}» будет удалён. У постов ссылка на него обнулится.` : ""}
+        confirmLabel="Удалить"
+        pending={remove.isPending}
+        error={remove.isError ? errorMessage(remove.error) : null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null);
+        }}
+        onConfirm={() => {
+          if (deleteTarget) remove.mutate(deleteTarget.id);
+        }}
+      />
+    </div>
+  );
+}
+
+type ToneDraft = { name: string; text: string };
+type ToneEditor = { mode: "create" } | { mode: "edit"; id: string } | null;
+
+function TonePresets() {
+  const queryClient = useQueryClient();
+  const [editor, setEditor] = useState<ToneEditor>(null);
+  const [draft, setDraft] = useState<ToneDraft>({ name: "", text: "" });
+  const [formError, setFormError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<TonePreset | null>(null);
+  const presets = useQuery({
+    queryKey: ["tone-presets"],
+    queryFn: () => api<TonePreset[]>("/tone-presets"),
+  });
+  const name = draft.name.trim();
+  const text = draft.text.trim();
+  const textError = text.length > 200 ? "текст тона длиннее 200 символов" : null;
+
+  const save = useMutation({
+    mutationFn: async () => {
+      if (!name) throw new Error("Нужно имя пресета");
+      if (!text) throw new Error("нужен текст тона");
+      if (text.length > 200) throw new Error("текст тона длиннее 200 символов");
+      const payload = { name, text };
+      if (editor?.mode === "edit") {
+        return api<TonePreset>(`/tone-presets/${editor.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      }
+      return api<TonePreset>("/tone-presets", { method: "POST", body: JSON.stringify(payload) });
+    },
+    onSuccess: async () => {
+      setEditor(null);
+      setFormError(null);
+      await queryClient.invalidateQueries({ queryKey: ["tone-presets"] });
+    },
+    onError: (error) => setFormError(errorMessage(error)),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => api<{ ok: true }>(`/tone-presets/${id}`, { method: "DELETE" }),
+    onSuccess: async () => {
+      setDeleteTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["tone-presets"] });
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-end gap-4">
+        <Button
+          type="button"
+          onClick={() => {
+            setDraft({ name: "", text: "" });
+            setFormError(null);
+            setEditor({ mode: "create" });
+          }}
+        >
+          Новый пресет
+        </Button>
+      </div>
+      <ErrorText message={presets.isError ? errorMessage(presets.error) : null} />
+      {presets.isPending ? <p className="text-sm text-muted-foreground">Загрузка…</p> : null}
+      {presets.data && presets.data.length === 0 ? (
+        <Card>
+          <p className="text-sm text-muted-foreground">Пресетов тона пока нет.</p>
+        </Card>
+      ) : null}
+      <div className="space-y-3">
+        {presets.data?.map((preset) => (
+          <Card key={preset.id}>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <p className="font-medium">{preset.name}</p>
+                {preset.text !== preset.name ? (
+                  <p className="line-clamp-3 text-sm text-muted-foreground">{preset.text}</p>
+                ) : null}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setDraft({ name: preset.name, text: preset.text });
+                    setFormError(null);
+                    setEditor({ mode: "edit", id: preset.id });
+                  }}
+                >
+                  Изменить
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => setDeleteTarget(preset)}>
+                  Удалить
+                </Button>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+      <Dialog
+        open={editor !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditor(null);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editor?.mode === "edit" ? "Изменить пресет" : "Новый пресет"}</DialogTitle>
+            <DialogDescription>Имя и текст тона. Выбор пресета подставляет текст в поле «Тон».</DialogDescription>
+          </DialogHeader>
+          <div className="mt-4 space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="tone-preset-name">Имя</Label>
+              <Input
+                id="tone-preset-name"
+                value={draft.name}
+                maxLength={120}
+                onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <FieldLabel htmlFor="tone-preset-text" hint="Эта фраза попадает в промпт как тон поста.">
+                Текст тона
+              </FieldLabel>
+              <Textarea
+                id="tone-preset-text"
+                value={draft.text}
+                maxLength={200}
+                onChange={(event) => setDraft((current) => ({ ...current, text: event.target.value }))}
+              />
+            </div>
+            <ErrorText message={formError ?? textError} />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditor(null)}>
+              Отмена
+            </Button>
+            <Button
+              type="button"
+              onClick={() => save.mutate()}
+              disabled={save.isPending || !name || !text || text.length > 200}
+            >
+              {save.isPending ? "Сохранение…" : "Сохранить"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Удалить пресет?"
+        description={deleteTarget ? `«${deleteTarget.name}» будет удалён. Уже созданные посты не изменятся.` : ""}
         confirmLabel="Удалить"
         pending={remove.isPending}
         error={remove.isError ? errorMessage(remove.error) : null}
