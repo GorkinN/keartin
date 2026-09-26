@@ -144,7 +144,7 @@ export function PostPreview({
               disabled={running !== null || !post.text || Boolean(seed.error)}
               onClick={() => onRegenerateImage(seed.value, imagePresetId === "none" ? null : imagePresetId)}
             >
-              Перегенерировать картинку
+              {post.imageKey ? "Перегенерировать картинку" : "Сгенерировать картинку"}
             </Button>
             {showHistoryLink ? (
               <Button type="button" variant="ghost" asChild>

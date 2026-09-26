@@ -24,6 +24,7 @@ export type GenerateInput = {
   steps: number;
   seed: number | null;
   count: number;
+  withImage: boolean;
 };
 
 const SEED_SPAN = 2_147_483_648;
@@ -71,6 +72,7 @@ export function parseGenerateInput(body: unknown): GenerateInput {
       ? null
       : optionalInt(body.seed, 0, 0, 2_147_483_647, "seed");
   const count = optionalInt(body.count, 1, 1, 20, "count");
+  const withImage = optionalBoolean(body.withImage, true, "withImage");
   return {
     topic,
     tone,
@@ -91,6 +93,7 @@ export function parseGenerateInput(body: unknown): GenerateInput {
     steps,
     seed,
     count,
+    withImage,
   };
 }
 

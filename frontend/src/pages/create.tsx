@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
 import { gpuBusyLabel, parseSeed } from "@/api/seed";
@@ -47,6 +47,7 @@ export function CreatePage() {
   const [cta, setCta] = useState(true);
   const [knowledgeMode, setKnowledgeMode] = useState<KnowledgeMode>("rag");
   const [presetId, setPresetId] = useState("none");
+  const [withImage, setWithImage] = useState(true);
   const [imagePresetId, setImagePresetId] = useState("none");
   const [sizePreset, setSizePreset] = useState<SizePresetId>("square");
   const [customWidth, setCustomWidth] = useState("1024");
@@ -112,7 +113,7 @@ export function CreatePage() {
     : knowledgeMode === "rag" && bookIds.length === 0
       ? "Для режима «только книги» выберите хотя бы одну готовую книгу"
       : null;
-  const blocked = Boolean(formReason) || Boolean(sizeError) || Boolean(seed.error);
+  const blocked = Boolean(formReason) || (withImage && (Boolean(sizeError) || Boolean(seed.error)));
   const selectedCount = parseCount(countText);
   const cooldownUntil = queue.data?.cooldownUntil ?? null;
   const queueBusy = (queue.data?.items.length ?? 0) > 0 || Boolean(cooldownUntil);
@@ -177,7 +178,9 @@ export function CreatePage() {
   };
 
   const generate = () => {
-    if (blocked || "error" in size || selectedCount === null || adding) return;
+    if (blocked || selectedCount === null || adding) return;
+    const width = "error" in size ? 1024 : size.width;
+    const height = "error" in size ? 1024 : size.height;
     setEnqueueError(null);
     setAdding(true);
     void api<EnqueueResult>("/generate/posts", {
@@ -193,8 +196,9 @@ export function CreatePage() {
         bookIds: knowledgeMode === "general" ? [] : bookIds,
         presetId: presetId === "none" ? null : presetId,
         imagePresetId: imagePresetId === "none" ? null : imagePresetId,
-        width: size.width,
-        height: size.height,
+        withImage,
+        width,
+        height,
         steps: IMAGE_STEPS,
         count: selectedCount,
         ...(seed.value !== undefined ? { seed: seed.value } : {}),
@@ -360,20 +364,6 @@ export function CreatePage() {
               </Select>
               {presets.isError ? <ErrorText message={errorMessage(presets.error)} /> : null}
             </div>
-            <div className="space-y-1.5">
-              <FieldLabel href="/presets?tab=image" hint="Текст стиля учитывается при описании картинки.">
-                Стиль картинки
-              </FieldLabel>
-              <Select value={imagePresetId} onValueChange={setImagePresetId}>
-                <SelectItem value="none">Без стиля</SelectItem>
-                {(imagePresets.data ?? []).map((preset) => (
-                  <SelectItem key={preset.id} value={preset.id}>
-                    {preset.name}
-                  </SelectItem>
-                ))}
-              </Select>
-              {imagePresets.isError ? <ErrorText message={errorMessage(imagePresets.error)} /> : null}
-            </div>
             <div className="space-y-3">
               <Toggle
                 label="Эмодзи"
@@ -406,52 +396,78 @@ export function CreatePage() {
                 onCheckedChange={setCta}
               />
             </div>
-            <div className="space-y-1.5">
-              <FieldLabel hint="Размер картинки.">Размер</FieldLabel>
-              <Select value={sizePreset} onValueChange={(value) => setSizePreset(value as SizePresetId)}>
-                {SIZE_PRESETS.map((item) => (
-                  <SelectItem key={item.id} value={item.id}>
-                    {item.width ? `${item.label} · ${item.width}×${item.height}` : item.label}
-                  </SelectItem>
-                ))}
-              </Select>
-              <p className="text-sm text-muted-foreground">От 256 до 1024, сторона кратна 16.</p>
-              {sizePreset === "custom" ? (
-                <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Toggle
+                label="Картинка"
+                hint="Выключено — сейчас пишется только текст. Картинку можно сгенерировать после."
+                checked={withImage}
+                onCheckedChange={setWithImage}
+              />
+              <Collapse open={withImage}>
+                <div className="space-y-4">
                   <div className="space-y-1.5">
-                    <Label htmlFor="width">Ширина</Label>
-                    <Input
-                      id="width"
-                      inputMode="numeric"
-                      value={customWidth}
-                      onChange={(event) => setCustomWidth(event.target.value)}
-                    />
+                    <FieldLabel href="/presets?tab=image" hint="Текст стиля учитывается при описании картинки.">
+                      Стиль картинки
+                    </FieldLabel>
+                    <Select value={imagePresetId} onValueChange={setImagePresetId}>
+                      <SelectItem value="none">Без стиля</SelectItem>
+                      {(imagePresets.data ?? []).map((preset) => (
+                        <SelectItem key={preset.id} value={preset.id}>
+                          {preset.name}
+                        </SelectItem>
+                      ))}
+                    </Select>
+                    {imagePresets.isError ? <ErrorText message={errorMessage(imagePresets.error)} /> : null}
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="height">Высота</Label>
+                    <FieldLabel hint="Размер картинки.">Размер</FieldLabel>
+                    <Select value={sizePreset} onValueChange={(value) => setSizePreset(value as SizePresetId)}>
+                      {SIZE_PRESETS.map((item) => (
+                        <SelectItem key={item.id} value={item.id}>
+                          {item.width ? `${item.label} · ${item.width}×${item.height}` : item.label}
+                        </SelectItem>
+                      ))}
+                    </Select>
+                    <p className="text-sm text-muted-foreground">От 256 до 1024, сторона кратна 16.</p>
+                    {sizePreset === "custom" ? (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="width">Ширина</Label>
+                          <Input
+                            id="width"
+                            inputMode="numeric"
+                            value={customWidth}
+                            onChange={(event) => setCustomWidth(event.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="height">Высота</Label>
+                          <Input
+                            id="height"
+                            inputMode="numeric"
+                            value={customHeight}
+                            onChange={(event) => setCustomHeight(event.target.value)}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+                    {sizePreset === "custom" ? <ErrorText message={sizeError} /> : null}
+                  </div>
+                  <div className="space-y-1.5">
+                    <FieldLabel htmlFor="seed" hint="Фиксирует случайность картинки. Пусто — каждый раз новая.">
+                      Seed картинки
+                    </FieldLabel>
                     <Input
-                      id="height"
+                      id="seed"
                       inputMode="numeric"
-                      value={customHeight}
-                      onChange={(event) => setCustomHeight(event.target.value)}
+                      placeholder="пусто — случайный"
+                      value={seedText}
+                      onChange={(event) => setSeedText(event.target.value)}
                     />
+                    <ErrorText message={seed.error} />
                   </div>
                 </div>
-              ) : null}
-              {sizePreset === "custom" ? <ErrorText message={sizeError} /> : null}
-            </div>
-            <div className="space-y-1.5">
-              <FieldLabel htmlFor="seed" hint="Фиксирует случайность картинки. Пусто — каждый раз новая.">
-                Seed картинки
-              </FieldLabel>
-              <Input
-                id="seed"
-                inputMode="numeric"
-                placeholder="пусто — случайный"
-                value={seedText}
-                onChange={(event) => setSeedText(event.target.value)}
-              />
-              <ErrorText message={seed.error} />
+              </Collapse>
             </div>
             <div className="space-y-1.5">
               <FieldLabel htmlFor="count" hint="Сколько постов с этими параметрами поставить в очередь.">
@@ -510,7 +526,13 @@ export function CreatePage() {
             {gpuLabel ? <p className="text-sm text-muted-foreground">{gpuLabel}</p> : null}
             <ErrorText message={enqueueError} />
             <Button type="button" onClick={generate} disabled={blocked || selectedCount === null || adding}>
-              {adding ? "Добавление…" : queueBusy ? "Добавить в очередь" : "Сгенерировать"}
+              {adding
+                ? "Добавление…"
+                : queueBusy
+                  ? "Добавить в очередь"
+                  : withImage
+                    ? "Сгенерировать"
+                    : "Сгенерировать текст"}
             </Button>
           </div>
         </TabsContent>
@@ -585,7 +607,7 @@ function QueueList({
         {items.map((item, index) => (
           <li key={item.jobId} className="flex items-center justify-between gap-3 text-sm">
             <span>
-              {index + 1}. {item.topic} · {queueStatusLabel(item.status)}
+              {index + 1}. {item.topic} · {queueKindLabel(item.kind)} · {queueStatusLabel(item.status)}
             </span>
             {item.status === "queued" ? (
               <Button
@@ -608,6 +630,12 @@ function QueueList({
       </ul>
     </div>
   );
+}
+
+function queueKindLabel(kind: string): string {
+  if (kind === "text") return "текст";
+  if (kind === "image") return "картинка";
+  return "текст и картинка";
 }
 
 function queueStatusLabel(status: string): string {
@@ -641,6 +669,63 @@ function formatCooldown(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function Collapse({ open, children }: { open: boolean; children: ReactNode }) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
+  const ready = useRef(false);
+  const generation = useRef(0);
+
+  useLayoutEffect(() => {
+    const outer = outerRef.current;
+    const inner = innerRef.current;
+    if (!outer || !inner) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const apply = (shown: boolean) => {
+      outer.getAnimations().forEach((animation) => animation.cancel());
+      outer.style.height = shown ? "auto" : "0px";
+      outer.style.opacity = shown ? "1" : "0";
+      outer.style.marginTop = shown ? "1rem" : "0px";
+    };
+    if (!ready.current || reduce) {
+      apply(open);
+      queueMicrotask(() => {
+        ready.current = true;
+      });
+      return;
+    }
+    const from = outer.getBoundingClientRect().height;
+    const to = open ? inner.offsetHeight : 0;
+    const id = generation.current + 1;
+    generation.current = id;
+    outer.style.height = `${from}px`;
+    const animation = outer.animate(
+      [
+        {
+          height: `${from}px`,
+          opacity: open ? 0 : 1,
+          marginTop: open ? "0px" : "1rem",
+        },
+        {
+          height: `${to}px`,
+          opacity: open ? 1 : 0,
+          marginTop: open ? "1rem" : "0px",
+        },
+      ],
+      { duration: 300, easing: "ease-out", fill: "forwards" },
+    );
+    animation.onfinish = () => {
+      if (generation.current !== id) return;
+      apply(open);
+    };
+  }, [open]);
+
+  return (
+    <div ref={outerRef} className="overflow-hidden" inert={!open} aria-hidden={!open}>
+      <div ref={innerRef}>{children}</div>
+    </div>
+  );
+}
+
 function Toggle({
   label,
   hint,
@@ -658,7 +743,7 @@ function Toggle({
         {label}
         <FieldHint text={hint} />
       </span>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} />
+      <Switch checked={checked} onCheckedChange={onCheckedChange} aria-label={label} />
     </div>
   );
 }

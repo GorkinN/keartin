@@ -64,7 +64,7 @@ export class GenerateService implements OnApplicationBootstrap {
         ...input,
         seed: batchSeed(input.seed, index, input.count),
       });
-      items.push(await this.enqueue(post.id, "full"));
+      items.push(await this.enqueue(post.id, input.withImage ? "full" : "text"));
       this.kick();
     }
     return { items };
@@ -122,7 +122,7 @@ export class GenerateService implements OnApplicationBootstrap {
     if (!job) throw new NotFoundException("джоба не найдена");
     if (job.status !== "queued") throw new ConflictException("задание уже выполняется");
     this.imageSeeds.delete(jobId);
-    if (job.post.status === "draft" && job.kind === "full") {
+    if (job.post.status === "draft" && (job.kind === "full" || job.kind === "text")) {
       await this.prisma.post.delete({ where: { id: job.postId } });
     } else {
       await this.prisma.generationJob.delete({ where: { id: jobId } });
