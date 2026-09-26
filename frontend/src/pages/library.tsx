@@ -126,7 +126,7 @@ export function LibraryPage() {
                     {buildingOutline
                       ? "Сбор…"
                       : book.outline.length > 0
-                        ? "Собрать заново"
+                        ? "Пересобрать оглавление"
                         : "Собрать оглавление"}
                   </Button>
                 ) : null}
