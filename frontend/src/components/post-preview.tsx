@@ -4,9 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
 import type { ImagePromptPreset, Post } from "@/api/types";
 import type { GenerationKind } from "@/hooks/useGeneration";
+import { FieldLabel } from "@/components/field-hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectItem } from "@/components/ui/select";
 import { ErrorText } from "@/components/error-text";
@@ -100,20 +100,26 @@ export function PostPreview({
       ) : null}
       {post && onRegenerateText && onRegenerateImage ? (
         <div className="space-y-3">
-          <div className="max-w-xs space-y-1.5">
-            <Label>Стиль картинки</Label>
-            <Select value={imagePresetId} onValueChange={setImagePresetId}>
-              <SelectItem value="none">Без стиля</SelectItem>
-              {(imagePresets.data ?? []).map((preset) => (
-                <SelectItem key={preset.id} value={preset.id}>
-                  {preset.name}
-                </SelectItem>
-              ))}
-            </Select>
+          <div className="space-y-1.5">
+            <FieldLabel href="/presets?tab=image" hint="Текст стиля учитывается при описании картинки.">
+              Стиль картинки
+            </FieldLabel>
+            <div className="max-w-xs">
+              <Select value={imagePresetId} onValueChange={setImagePresetId}>
+                <SelectItem value="none">Без стиля</SelectItem>
+                {(imagePresets.data ?? []).map((preset) => (
+                  <SelectItem key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </SelectItem>
+                ))}
+              </Select>
+            </div>
             {imagePresets.isError ? <ErrorText message={errorMessage(imagePresets.error)} /> : null}
           </div>
           <div className="max-w-xs space-y-1.5">
-            <Label htmlFor="regen-seed">Seed картинки</Label>
+            <FieldLabel htmlFor="regen-seed" hint="Фиксирует случайность картинки. Пусто — каждый раз новая.">
+              Seed картинки
+            </FieldLabel>
             <Input
               id="regen-seed"
               inputMode="numeric"

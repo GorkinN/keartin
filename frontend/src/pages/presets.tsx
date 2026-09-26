@@ -1,9 +1,11 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
 import type { ImagePromptPreset, Preset } from "@/api/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorText } from "@/components/error-text";
+import { FieldHint, FieldLabel } from "@/components/field-hint";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -33,10 +35,17 @@ type Editor =
 const emptyDraft = (): Draft => ({ name: "", description: "", examples: [""] });
 
 export function PresetsPage() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") === "image" ? "image" : "text";
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Пресеты</h1>
-      <Tabs defaultValue="text">
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          setParams({ tab: value }, { replace: true });
+        }}
+      >
         <TabsList>
           <TabsTrigger value="text">Текст</TabsTrigger>
           <TabsTrigger value="image">Картинка</TabsTrigger>
@@ -169,7 +178,12 @@ function TextPresets() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="preset-description">Описание</Label>
+              <FieldLabel
+                htmlFor="preset-description"
+                hint="Задаёт стиль текста и попадает в промпт вместе с примерами."
+              >
+                Описание
+              </FieldLabel>
               <Textarea
                 id="preset-description"
                 value={draft.description}
@@ -179,7 +193,10 @@ function TextPresets() {
             {draft.examples.map((example, index) => (
               <div key={index} className="space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <Label htmlFor={`example-${index}`}>Пример {index + 1}</Label>
+                  <span className="flex items-center gap-1.5">
+                    <Label htmlFor={`example-${index}`}>Пример {index + 1}</Label>
+                    <FieldHint text="Образец текста в этом стиле. Вместе с описанием задаёт стиль." />
+                  </span>
                   {draft.examples.length > 1 ? (
                     <Button
                       type="button"
@@ -369,7 +386,9 @@ function ImagePresets() {
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="image-preset-prompt">Промпт стиля</Label>
+              <FieldLabel htmlFor="image-preset-prompt" hint="Задаёт стиль картинки: свет, палитру и подачу.">
+                Промпт стиля
+              </FieldLabel>
               <Textarea
                 id="image-preset-prompt"
                 value={draft.prompt}
