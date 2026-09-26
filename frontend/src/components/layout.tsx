@@ -5,7 +5,7 @@ const links = [
   { to: "/", label: "Библиотека" },
   { to: "/create", label: "Создать" },
   { to: "/history", label: "История" },
-  { to: "/presets", label: "Пресеты" },
+  { to: "/presets", label: "Шаблоны" },
 ];
 
 export function Layout() {

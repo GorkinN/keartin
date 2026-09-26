@@ -44,7 +44,7 @@ export function PresetsPage() {
   const tab = presetTab(params.get("tab"));
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Пресеты</h1>
+      <h1 className="text-2xl font-semibold">Шаблоны</h1>
       <Tabs
         value={tab}
         onValueChange={(value) => {
@@ -85,8 +85,8 @@ function TextPresets() {
     mutationFn: async () => {
       const name = draft.name.trim();
       const description = draft.description.trim();
-      if (!name) throw new Error("Нужно имя пресета");
-      if (description.length < 10) throw new Error("описание пресета короче 10 символов");
+      if (!name) throw new Error("Нужно имя шаблона");
+      if (description.length < 10) throw new Error("описание шаблона короче 10 символов");
       const payload = {
         name,
         description,
@@ -133,14 +133,14 @@ function TextPresets() {
     <div className="space-y-6">
       <div className="flex items-center justify-end gap-4">
         <Button type="button" onClick={openCreate}>
-          Новый пресет
+          Новый шаблон
         </Button>
       </div>
       <ErrorText message={presets.isError ? errorMessage(presets.error) : null} />
       {presets.isPending ? <p className="text-sm text-muted-foreground">Загрузка…</p> : null}
       {presets.data && presets.data.length === 0 ? (
         <Card>
-          <p className="text-sm text-muted-foreground">Пресетов пока нет.</p>
+          <p className="text-sm text-muted-foreground">Шаблонов пока нет.</p>
         </Card>
       ) : null}
       <div className="space-y-3">
@@ -174,7 +174,7 @@ function TextPresets() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editor?.mode === "edit" ? "Изменить пресет" : "Новый пресет"}</DialogTitle>
+            <DialogTitle>{editor?.mode === "edit" ? "Изменить шаблон" : "Новый шаблон"}</DialogTitle>
             <DialogDescription>Имя, описание стиля и до пяти примеров.</DialogDescription>
           </DialogHeader>
           <div className="mt-4 space-y-3">
@@ -263,7 +263,7 @@ function TextPresets() {
       </Dialog>
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Удалить пресет?"
+        title="Удалить шаблон?"
         description={deleteTarget ? `«${deleteTarget.name}» будет удалён. У постов ссылка на него обнулится.` : ""}
         confirmLabel="Удалить"
         pending={remove.isPending}
@@ -297,8 +297,8 @@ function ImagePresets() {
     mutationFn: async () => {
       const name = draft.name.trim();
       const prompt = draft.prompt.trim();
-      if (!name) throw new Error("Нужно имя пресета");
-      if (prompt.length < 10) throw new Error("промпт пресета короче 10 символов");
+      if (!name) throw new Error("Нужно имя шаблона");
+      if (prompt.length < 10) throw new Error("промпт шаблона короче 10 символов");
       const payload = { name, prompt };
       if (editor?.mode === "edit") {
         return api<ImagePromptPreset>(`/image-presets/${editor.id}`, {
@@ -335,14 +335,14 @@ function ImagePresets() {
             setEditor({ mode: "create" });
           }}
         >
-          Новый пресет
+          Новый шаблон
         </Button>
       </div>
       <ErrorText message={presets.isError ? errorMessage(presets.error) : null} />
       {presets.isPending ? <p className="text-sm text-muted-foreground">Загрузка…</p> : null}
       {presets.data && presets.data.length === 0 ? (
         <Card>
-          <p className="text-sm text-muted-foreground">Пресетов картинки пока нет.</p>
+          <p className="text-sm text-muted-foreground">Шаблонов картинки пока нет.</p>
         </Card>
       ) : null}
       <div className="space-y-3">
@@ -382,7 +382,7 @@ function ImagePresets() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editor?.mode === "edit" ? "Изменить пресет" : "Новый пресет"}</DialogTitle>
+            <DialogTitle>{editor?.mode === "edit" ? "Изменить шаблон" : "Новый шаблон"}</DialogTitle>
             <DialogDescription>Имя и текст стиля картинки. Его переформулирует модель промпта.</DialogDescription>
           </DialogHeader>
           <div className="mt-4 space-y-3">
@@ -422,7 +422,7 @@ function ImagePresets() {
       </Dialog>
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Удалить пресет?"
+        title="Удалить шаблон?"
         description={deleteTarget ? `«${deleteTarget.name}» будет удалён. У постов ссылка на него обнулится.` : ""}
         confirmLabel="Удалить"
         pending={remove.isPending}
@@ -457,7 +457,7 @@ function TonePresets() {
 
   const save = useMutation({
     mutationFn: async () => {
-      if (!name) throw new Error("Нужно имя пресета");
+      if (!name) throw new Error("Нужно имя шаблона");
       if (!text) throw new Error("нужен текст тона");
       if (text.length > 200) throw new Error("текст тона длиннее 200 символов");
       const payload = { name, text };
@@ -496,14 +496,14 @@ function TonePresets() {
             setEditor({ mode: "create" });
           }}
         >
-          Новый пресет
+          Новый шаблон
         </Button>
       </div>
       <ErrorText message={presets.isError ? errorMessage(presets.error) : null} />
       {presets.isPending ? <p className="text-sm text-muted-foreground">Загрузка…</p> : null}
       {presets.data && presets.data.length === 0 ? (
         <Card>
-          <p className="text-sm text-muted-foreground">Пресетов тона пока нет.</p>
+          <p className="text-sm text-muted-foreground">Шаблонов тона пока нет.</p>
         </Card>
       ) : null}
       <div className="space-y-3">
@@ -545,8 +545,8 @@ function TonePresets() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editor?.mode === "edit" ? "Изменить пресет" : "Новый пресет"}</DialogTitle>
-            <DialogDescription>Имя и текст тона. Выбор пресета подставляет текст в поле «Тон».</DialogDescription>
+            <DialogTitle>{editor?.mode === "edit" ? "Изменить шаблон" : "Новый шаблон"}</DialogTitle>
+            <DialogDescription>Имя и текст тона. Выбор шаблона подставляет текст в поле «Тон».</DialogDescription>
           </DialogHeader>
           <div className="mt-4 space-y-3">
             <div className="space-y-1.5">
@@ -587,7 +587,7 @@ function TonePresets() {
       </Dialog>
       <ConfirmDialog
         open={deleteTarget !== null}
-        title="Удалить пресет?"
+        title="Удалить шаблон?"
         description={deleteTarget ? `«${deleteTarget.name}» будет удалён. Уже созданные посты не изменятся.` : ""}
         confirmLabel="Удалить"
         pending={remove.isPending}

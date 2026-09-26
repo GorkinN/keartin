@@ -303,7 +303,7 @@ export function CreatePage() {
               <FieldLabel
                 htmlFor="tone"
                 href="/presets?tab=tone"
-                hint="Можно выбрать пресет или написать свой. Пустое поле даёт тон по умолчанию."
+                hint="Можно выбрать шаблон или написать свой. Пустое поле даёт тон по умолчанию."
               >
                 Тон
               </FieldLabel>
@@ -312,7 +312,7 @@ export function CreatePage() {
                 value={tone}
                 placeholder="живой, разговорный"
                 maxLength={200}
-                listLabel="Пресеты тона"
+                listLabel="Шаблоны тона"
                 options={(tonePresets.data ?? []).map((preset) => ({
                   id: preset.id,
                   label: preset.name,
@@ -348,10 +348,10 @@ export function CreatePage() {
             </div>
             <div className="space-y-1.5">
               <FieldLabel href="/presets?tab=text" hint="Описание и примеры текста уходят в промпт как стиль.">
-                Пресет стиля
+                Шаблон стиля
               </FieldLabel>
               <Select value={presetId} onValueChange={setPresetId}>
-                <SelectItem value="none">Без пресета</SelectItem>
+                <SelectItem value="none">Без шаблона</SelectItem>
                 {(presets.data ?? []).map((preset) => (
                   <SelectItem key={preset.id} value={preset.id}>
                     {preset.name}

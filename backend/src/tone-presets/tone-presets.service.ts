@@ -63,7 +63,7 @@ export class TonePresetsService {
 
   private async find(id: string): Promise<TonePreset> {
     const row = await this.prisma.tonePreset.findUnique({ where: { id } });
-    if (!row) throw new NotFoundException("пресет тона не найден");
+    if (!row) throw new NotFoundException("шаблон тона не найден");
     return row;
   }
 }
@@ -83,10 +83,10 @@ function parsePreset(body: unknown, creating: boolean): { name?: string; text?: 
   const result: { name?: string; text?: string } = {};
   if (body.name !== undefined || creating) {
     if (typeof body.name !== "string" || !body.name.trim()) {
-      throw new BadRequestException("нужно имя пресета");
+      throw new BadRequestException("нужно имя шаблона");
     }
     const name = body.name.trim();
-    if (name.length > 120) throw new BadRequestException("имя пресета длиннее 120 символов");
+    if (name.length > 120) throw new BadRequestException("имя шаблона длиннее 120 символов");
     result.name = name;
   }
   if (body.text !== undefined || creating) {

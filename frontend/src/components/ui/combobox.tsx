@@ -14,7 +14,7 @@ export function Combobox({
   onValueChange,
   options,
   placeholder,
-  emptyLabel = "Пресетов пока нет",
+  emptyLabel = "Шаблонов пока нет",
   listLabel = "Открыть список",
   maxLength,
 }: {

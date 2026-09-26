@@ -63,7 +63,7 @@ export class ImagePresetsService {
 
   private async find(id: string): Promise<ImagePromptPreset> {
     const row = await this.prisma.imagePromptPreset.findUnique({ where: { id } });
-    if (!row) throw new NotFoundException("пресет картинки не найден");
+    if (!row) throw new NotFoundException("шаблон картинки не найден");
     return row;
   }
 }
@@ -83,22 +83,22 @@ function parsePreset(body: unknown, creating: boolean): { name?: string; prompt?
   const result: { name?: string; prompt?: string } = {};
   if (body.name !== undefined || creating) {
     if (typeof body.name !== "string" || !body.name.trim()) {
-      throw new BadRequestException("нужно имя пресета");
+      throw new BadRequestException("нужно имя шаблона");
     }
     const name = body.name.trim();
-    if (name.length > 120) throw new BadRequestException("имя пресета длиннее 120 символов");
+    if (name.length > 120) throw new BadRequestException("имя шаблона длиннее 120 символов");
     result.name = name;
   }
   if (body.prompt !== undefined || creating) {
     if (typeof body.prompt !== "string") {
-      throw new BadRequestException("промпт пресета должен быть строкой");
+      throw new BadRequestException("промпт шаблона должен быть строкой");
     }
     const prompt = body.prompt.trim();
     if (prompt.length < 10) {
-      throw new BadRequestException("промпт пресета короче 10 символов");
+      throw new BadRequestException("промпт шаблона короче 10 символов");
     }
     if (prompt.length > 4000) {
-      throw new BadRequestException("промпт пресета длиннее 4000 символов");
+      throw new BadRequestException("промпт шаблона длиннее 4000 символов");
     }
     result.prompt = prompt;
   }

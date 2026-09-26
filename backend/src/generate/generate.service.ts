@@ -598,13 +598,13 @@ export class GenerateService implements OnApplicationBootstrap {
 
   private async requirePreset(id: string): Promise<StylePreset> {
     const preset = await this.prisma.stylePreset.findUnique({ where: { id } });
-    if (!preset) throw new NotFoundException("пресет не найден");
+    if (!preset) throw new NotFoundException("шаблон не найден");
     return preset;
   }
 
   private async requireImagePreset(id: string) {
     const preset = await this.prisma.imagePromptPreset.findUnique({ where: { id } });
-    if (!preset) throw new NotFoundException("пресет картинки не найден");
+    if (!preset) throw new NotFoundException("шаблон картинки не найден");
     return preset;
   }
 

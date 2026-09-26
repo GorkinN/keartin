@@ -66,7 +66,7 @@ export class PresetsService {
 
   private async find(id: string): Promise<StylePreset> {
     const row = await this.prisma.stylePreset.findUnique({ where: { id } });
-    if (!row) throw new NotFoundException("пресет не найден");
+    if (!row) throw new NotFoundException("шаблон не найден");
     return row;
   }
 }
@@ -90,22 +90,22 @@ function parsePreset(
   const result: { name?: string; description?: string; examples?: string[] } = {};
   if (body.name !== undefined || creating) {
     if (typeof body.name !== "string" || !body.name.trim()) {
-      throw new BadRequestException("нужно имя пресета");
+      throw new BadRequestException("нужно имя шаблона");
     }
     const name = body.name.trim();
-    if (name.length > 120) throw new BadRequestException("имя пресета длиннее 120 символов");
+    if (name.length > 120) throw new BadRequestException("имя шаблона длиннее 120 символов");
     result.name = name;
   }
   if (body.description !== undefined || creating) {
     if (typeof body.description !== "string") {
-      throw new BadRequestException("описание пресета должно быть строкой");
+      throw new BadRequestException("описание шаблона должно быть строкой");
     }
     const description = body.description.trim();
     if (description.length < 10) {
-      throw new BadRequestException("описание пресета короче 10 символов");
+      throw new BadRequestException("описание шаблона короче 10 символов");
     }
     if (description.length > 4000) {
-      throw new BadRequestException("описание пресета длиннее 4000 символов");
+      throw new BadRequestException("описание шаблона длиннее 4000 символов");
     }
     result.description = description;
   }
