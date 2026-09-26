@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
@@ -10,13 +10,59 @@ import { ErrorText } from "@/components/error-text";
 import { PostPreview } from "@/components/post-preview";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useGeneration } from "@/hooks/useGeneration";
 
+const PREVIEW_WORDS = 8;
+const historyColumns = "grid grid-cols-[minmax(11rem,0.85fr)_minmax(0,1.4fr)]";
+
+type PostGroup = {
+  topic: string;
+  posts: Post[];
+  newest: number;
+};
+
+function postExcerpt(text: string): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "без текста";
+  const preview = words.slice(0, PREVIEW_WORDS).join(" ");
+  return words.length > PREVIEW_WORDS ? `${preview}…` : preview;
+}
+
+function groupPosts(posts: Post[]): PostGroup[] {
+  const byTopic = new Map<string, Post[]>();
+  for (const post of posts) {
+    const topic = post.topic.trim();
+    const list = byTopic.get(topic);
+    if (list) list.push(post);
+    else byTopic.set(topic, [post]);
+  }
+
+  const groups = [...byTopic.entries()].map(([topic, items]) => {
+    const sorted = [...items].sort((a, b) => {
+      const byDate = Date.parse(a.createdAt) - Date.parse(b.createdAt);
+      if (byDate !== 0) return byDate;
+      return a.id.localeCompare(b.id);
+    });
+    const newest = sorted.reduce((max, post) => Math.max(max, Date.parse(post.createdAt)), 0);
+    return { topic, posts: sorted, newest };
+  });
+  groups.sort((a, b) => b.newest - a.newest || a.topic.localeCompare(b.topic));
+  return groups;
+}
+
 export function HistoryPage() {
+  const [titleQuery, setTitleQuery] = useState("");
   const posts = useQuery({
     queryKey: ["posts"],
     queryFn: () => api<Post[]>("/posts"),
   });
+  const needle = titleQuery.trim().toLowerCase();
+  const groups = useMemo(() => {
+    const all = groupPosts(posts.data ?? []);
+    if (!needle) return all;
+    return all.filter((group) => group.topic.toLowerCase().includes(needle));
+  }, [posts.data, needle]);
 
   return (
     <div className="space-y-6">
@@ -28,18 +74,48 @@ export function HistoryPage() {
           <p className="text-sm text-muted-foreground">Постов пока нет.</p>
         </Card>
       ) : null}
-      <div className="space-y-3">
-        {posts.data?.map((post) => (
-          <Link key={post.id} to={`/history/${post.id}`} className="block">
-            <Card>
-              <p className="font-medium">{post.topic}</p>
-              <p className="text-sm text-muted-foreground">
-                {postStatusLabel(post.status)} · {formatWhen(post.createdAt)}
-              </p>
-            </Card>
-          </Link>
-        ))}
-      </div>
+      {posts.data && posts.data.length > 0 ? (
+        <div className="space-y-4">
+          <Input
+            value={titleQuery}
+            onChange={(event) => setTitleQuery(event.target.value)}
+            placeholder="Фильтр по названию"
+            aria-label="Фильтр по названию"
+          />
+          {groups.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Ничего не найдено.</p>
+          ) : (
+            <div className="overflow-hidden rounded-lg border border-border">
+              <div className={`${historyColumns} border-b border-border bg-muted/50 text-sm font-medium`}>
+                <div className="px-4 py-2">Название</div>
+                <div className="px-4 py-2">Пост</div>
+              </div>
+              {groups.map((group) => (
+                <div key={group.topic} className="divide-y divide-border border-b border-border last:border-b-0">
+                  {group.posts.map((post, index) => (
+                    <div key={post.id} className={historyColumns}>
+                      <div className="px-4 py-3">
+                        {index === 0 ? <p className="font-medium">{group.topic}</p> : null}
+                        <p className="text-sm text-muted-foreground">{formatWhen(post.createdAt)}</p>
+                      </div>
+                      <Link
+                        to={`/history/${post.id}`}
+                        className="block self-end px-4 py-3 text-sm hover:bg-muted"
+                      >
+                        {group.posts.length > 1 ? `${index + 1}. ` : null}
+                        {postExcerpt(post.text)}
+                        {post.status !== "ready" ? (
+                          <span className="text-muted-foreground"> · {postStatusLabel(post.status)}</span>
+                        ) : null}
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
