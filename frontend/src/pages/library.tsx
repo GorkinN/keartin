@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
 import { bookStatusLabel } from "@/api/labels";
 import type { Book } from "@/api/types";
+import { BookOutline } from "@/components/book-outline";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorText } from "@/components/error-text";
 import { Button } from "@/components/ui/button";
@@ -103,64 +104,53 @@ export function LibraryPage() {
           const buildingOutline = outline.isPending && outline.variables === book.id;
           return (
             <Card key={book.id}>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 space-y-1">
-                  <p className="truncate font-medium">{book.filename}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {book.format} ·{" "}
-                    {outlining ? "оглавление" : ocr ? "распознавание скана" : bookStatusLabel(book.status)}
-                    {ocr && book.pagesTotal > 0 ? ` · страница ${book.pagesDone}/${book.pagesTotal}` : ""}
-                    {!ocr && !outlining && book.chunksTotal > 0 ? ` · ${book.chunksDone}/${book.chunksTotal}` : ""}
-                    {book.textKey && !ocr ? " · текст распознан" : ""}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {book.status === "ready" ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={outline.isPending || reindex.isPending}
-                      onClick={() => outline.mutate(book.id)}
-                    >
-                      {buildingOutline
-                        ? "Сбор…"
-                        : book.outline.length > 0
-                          ? "Собрать заново"
-                          : "Собрать оглавление"}
-                    </Button>
-                  ) : null}
+              <div className="space-y-1">
+                <p className="break-words font-medium">{book.filename}</p>
+                <p className="text-sm text-muted-foreground">
+                  {book.format} ·{" "}
+                  {outlining ? "оглавление" : ocr ? "распознавание скана" : bookStatusLabel(book.status)}
+                  {ocr && book.pagesTotal > 0 ? ` · страница ${book.pagesDone}/${book.pagesTotal}` : ""}
+                  {!ocr && !outlining && book.chunksTotal > 0 ? ` · ${book.chunksDone}/${book.chunksTotal}` : ""}
+                  {book.textKey && !ocr ? " · текст распознан" : ""}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {book.status === "ready" ? (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={book.status === "indexing" || reindex.isPending || buildingOutline}
-                    onClick={() => reindex.mutate(book.id)}
+                    disabled={outline.isPending || reindex.isPending}
+                    onClick={() => outline.mutate(book.id)}
                   >
-                    Переиндексировать
+                    {buildingOutline
+                      ? "Сбор…"
+                      : book.outline.length > 0
+                        ? "Собрать заново"
+                        : "Собрать оглавление"}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={buildingOutline}
-                    onClick={() => setDeleteTarget(book)}
-                  >
-                    Удалить
-                  </Button>
-                </div>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={book.status === "indexing" || reindex.isPending || buildingOutline}
+                  onClick={() => reindex.mutate(book.id)}
+                >
+                  Переиндексировать
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={buildingOutline}
+                  onClick={() => setDeleteTarget(book)}
+                >
+                  Удалить
+                </Button>
               </div>
               {showProgress ? <Progress value={percent} /> : null}
-              {book.status === "ready" && book.outline.length > 0 ? (
-                <details className="text-sm">
-                  <summary className="cursor-pointer text-muted-foreground">Оглавление</summary>
-                  <ol className="mt-2 list-decimal space-y-1 pl-5">
-                    {book.outline.map((item, index) => (
-                      <li key={`${index}-${item}`}>{item}</li>
-                    ))}
-                  </ol>
-                </details>
-              ) : null}
+              {book.status === "ready" && book.outline.length > 0 ? <BookOutline items={book.outline} /> : null}
               {book.outlineError ? <p className="text-sm text-destructive">{book.outlineError}</p> : null}
               {book.error ? <p className="text-sm text-destructive">{book.error}</p> : null}
             </Card>

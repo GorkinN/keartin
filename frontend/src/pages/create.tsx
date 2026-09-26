@@ -15,6 +15,7 @@ import type {
   PostLength,
   Preset,
 } from "@/api/types";
+import { BookOutline } from "@/components/book-outline";
 import { ErrorText } from "@/components/error-text";
 import { FieldHint, FieldLabel } from "@/components/field-hint";
 import { PostPreview } from "@/components/post-preview";
@@ -89,7 +90,11 @@ export function CreatePage() {
   const readyBooks = (books.data ?? []).filter((book) => book.status === "ready");
   const sourceNeedle = sourceQuery.trim().toLowerCase();
   const visibleBooks = sourceNeedle
-    ? readyBooks.filter((book) => book.filename.toLowerCase().includes(sourceNeedle))
+    ? readyBooks.filter(
+        (book) =>
+          book.filename.toLowerCase().includes(sourceNeedle) ||
+          book.outline.some((item) => item.toLowerCase().includes(sourceNeedle)),
+      )
     : readyBooks;
   const visibleIds = visibleBooks.map((book) => book.id);
   const size = resolveSize(sizePreset, customWidth, customHeight);
@@ -227,8 +232,8 @@ export function CreatePage() {
                 <Input
                   value={sourceQuery}
                   onChange={(event) => setSourceQuery(event.target.value)}
-                  placeholder="Фильтр по названию"
-                  aria-label="Фильтр по названию"
+                  placeholder="Фильтр по названию или оглавлению"
+                  aria-label="Фильтр по названию или оглавлению"
                 />
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -254,14 +259,23 @@ export function CreatePage() {
                   <p className="text-sm text-muted-foreground">Ничего не найдено.</p>
                 ) : (
                   visibleBooks.map((book) => (
-                    <label key={book.id} className="flex cursor-pointer items-center gap-3 text-sm">
-                      <Switch
-                        checked={bookIds.includes(book.id)}
-                        onCheckedChange={() => toggleBook(book.id)}
-                        aria-label={book.filename}
-                      />
-                      <span>{book.filename}</span>
-                    </label>
+                    <div key={book.id} className="space-y-2">
+                      <label className="flex cursor-pointer items-center gap-3 text-sm">
+                        <Switch
+                          checked={bookIds.includes(book.id)}
+                          onCheckedChange={() => toggleBook(book.id)}
+                          aria-label={book.filename}
+                        />
+                        <span>{book.filename}</span>
+                      </label>
+                      {book.outline.length > 0 ? (
+                        <BookOutline className="pl-12 text-muted-foreground" items={book.outline} />
+                      ) : book.outlineError ? (
+                        <p className="pl-12 text-sm text-destructive">{book.outlineError}</p>
+                      ) : (
+                        <p className="pl-12 text-sm text-muted-foreground">Оглавление не собрано</p>
+                      )}
+                    </div>
                   ))
                 )}
               </>
