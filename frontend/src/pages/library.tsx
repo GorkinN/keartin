@@ -42,6 +42,15 @@ export function LibraryPage() {
     onError: (error) => setActionError(errorMessage(error)),
   });
 
+  const outline = useMutation({
+    mutationFn: (id: string) => api<Book>(`/library/books/${id}/outline`, { method: "POST" }),
+    onSuccess: async () => {
+      setActionError(null);
+      await queryClient.invalidateQueries({ queryKey: ["books"] });
+    },
+    onError: (error) => setActionError(errorMessage(error)),
+  });
+
   const remove = useMutation({
     mutationFn: (id: string) => api<{ ok: true }>(`/library/books/${id}`, { method: "DELETE" }),
     onSuccess: async () => {
@@ -81,6 +90,7 @@ export function LibraryPage() {
       <div className="space-y-3">
         {books.data?.map((book) => {
           const ocr = book.status === "indexing" && book.phase === "ocr";
+          const outlining = book.status === "indexing" && book.phase === "outline";
           const percent = ocr
             ? book.pagesTotal > 0
               ? (book.pagesDone / book.pagesTotal) * 100
@@ -88,35 +98,70 @@ export function LibraryPage() {
             : book.chunksTotal > 0
               ? (book.chunksDone / book.chunksTotal) * 100
               : 0;
-          const showProgress = book.status === "indexing" && (ocr ? book.pagesTotal > 0 : book.chunksTotal > 0);
+          const showProgress =
+            book.status === "indexing" && !outlining && (ocr ? book.pagesTotal > 0 : book.chunksTotal > 0);
+          const buildingOutline = outline.isPending && outline.variables === book.id;
           return (
             <Card key={book.id}>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 space-y-1">
                   <p className="truncate font-medium">{book.filename}</p>
                   <p className="text-sm text-muted-foreground">
-                    {book.format} · {ocr ? "распознавание скана" : bookStatusLabel(book.status)}
+                    {book.format} ·{" "}
+                    {outlining ? "оглавление" : ocr ? "распознавание скана" : bookStatusLabel(book.status)}
                     {ocr && book.pagesTotal > 0 ? ` · страница ${book.pagesDone}/${book.pagesTotal}` : ""}
-                    {!ocr && book.chunksTotal > 0 ? ` · ${book.chunksDone}/${book.chunksTotal}` : ""}
+                    {!ocr && !outlining && book.chunksTotal > 0 ? ` · ${book.chunksDone}/${book.chunksTotal}` : ""}
                     {book.textKey && !ocr ? " · текст распознан" : ""}
                   </p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  {book.status === "ready" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={outline.isPending || reindex.isPending}
+                      onClick={() => outline.mutate(book.id)}
+                    >
+                      {buildingOutline
+                        ? "Сбор…"
+                        : book.outline.length > 0
+                          ? "Собрать заново"
+                          : "Собрать оглавление"}
+                    </Button>
+                  ) : null}
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={book.status === "indexing" || reindex.isPending}
+                    disabled={book.status === "indexing" || reindex.isPending || buildingOutline}
                     onClick={() => reindex.mutate(book.id)}
                   >
                     Переиндексировать
                   </Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => setDeleteTarget(book)}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={buildingOutline}
+                    onClick={() => setDeleteTarget(book)}
+                  >
                     Удалить
                   </Button>
                 </div>
               </div>
               {showProgress ? <Progress value={percent} /> : null}
+              {book.status === "ready" && book.outline.length > 0 ? (
+                <details className="text-sm">
+                  <summary className="cursor-pointer text-muted-foreground">Оглавление</summary>
+                  <ol className="mt-2 list-decimal space-y-1 pl-5">
+                    {book.outline.map((item, index) => (
+                      <li key={`${index}-${item}`}>{item}</li>
+                    ))}
+                  </ol>
+                </details>
+              ) : null}
+              {book.outlineError ? <p className="text-sm text-destructive">{book.outlineError}</p> : null}
               {book.error ? <p className="text-sm text-destructive">{book.error}</p> : null}
             </Card>
           );

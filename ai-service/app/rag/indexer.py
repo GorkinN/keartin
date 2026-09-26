@@ -18,6 +18,7 @@ from app.settings import Settings
 logger = logging.getLogger(__name__)
 
 OcrRunner = Callable[[Path, Callable[[int, int], None]], Awaitable[str]]
+OutlineRunner = Callable[[list[str]], Awaitable[list[str]]]
 
 
 class Indexer:
@@ -28,20 +29,22 @@ class Indexer:
         store: QdrantStore,
         jobs: JobStore,
         ocr: OcrRunner | None = None,
+        outline: OutlineRunner | None = None,
     ) -> None:
         self._settings = settings
         self._embedder = embedder
         self._store = store
         self._jobs = jobs
         self._ocr = ocr
+        self._outline = outline
         self._lock = asyncio.Lock()
 
     async def run(self, job: IndexJob, path: Path) -> None:
+        chunks: list[str] | None = None
         async with self._lock:
             job.status = "indexing"
             try:
-                await self._index_locked(job, path)
-                job.status = "ready"
+                chunks = await self._index_locked(job, path)
             except Exception as exc:
                 logger.exception("index job %s failed", job.job_id)
                 job.status = "error"
@@ -49,8 +52,29 @@ class Indexer:
                     job.error = public_message(exc)
                 else:
                     job.error = public_message(RuntimeError(f"Indexing failed: {exc}"))
+                return
+            if self._outline is None:
+                job.status = "ready"
+                return
+        await self._write_outline(job, chunks or [])
 
-    async def _index_locked(self, job: IndexJob, path: Path) -> None:
+    async def _write_outline(self, job: IndexJob, chunks: list[str]) -> None:
+        outline = self._outline
+        if outline is None:
+            job.status = "ready"
+            return
+        job.phase = "outline"
+        job.outline = []
+        job.outline_error = None
+        try:
+            job.outline = await outline(chunks)
+        except Exception as exc:
+            logger.exception("outline job %s failed", job.job_id)
+            job.outline = []
+            job.outline_error = public_message(exc)
+        job.status = "ready"
+
+    async def _index_locked(self, job: IndexJob, path: Path) -> list[str]:
         job.phase = "parse"
         parsed = await self._parse(job, path)
         job.source_name = job.source_name or parsed.source_name
@@ -81,6 +105,7 @@ class Indexer:
             )
             job.chunks_done = start + len(batch)
         logger.info("indexed book_id=%s chunks=%s", job.book_id, job.chunks_total)
+        return chunks
 
     async def _parse(self, job: IndexJob, path: Path) -> ParsedDocument:
         try:

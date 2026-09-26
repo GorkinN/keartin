@@ -9,11 +9,13 @@ from app.api.pipeline import router as pipeline_router
 from app.api.rag import router as rag_router
 from app.gpu.manager import GpuManager
 from app.image.flux_pipeline import FluxPipelineHolder
+from app.llm.ollama_client import OllamaClient
 from app.ocr.deepseek import DeepseekOcrHolder
 from app.ocr.runner import ScanOcr
 from app.rag.embedder import Embedder
 from app.rag.indexer import Indexer
 from app.rag.jobs import JobStore
+from app.rag.outline import OutlineWriter
 from app.rag.qdrant_store import QdrantStore
 from app.rag.retriever import Retriever
 from app.settings import get_settings
@@ -28,7 +30,8 @@ gpu.attach_ocr(ocr)
 embedder = Embedder(settings)
 qdrant = QdrantStore(settings)
 rag_jobs = JobStore()
-indexer = Indexer(settings, embedder, qdrant, rag_jobs, ocr=ScanOcr(settings, gpu, ocr))
+outline = OutlineWriter(gpu, OllamaClient(settings))
+indexer = Indexer(settings, embedder, qdrant, rag_jobs, ocr=ScanOcr(settings, gpu, ocr), outline=outline)
 retriever = Retriever(settings, embedder, qdrant)
 
 app = FastAPI(title="llm-keartin AI service", version="0.1.0")
@@ -38,6 +41,7 @@ app.state.embedder = embedder
 app.state.qdrant = qdrant
 app.state.rag_jobs = rag_jobs
 app.state.indexer = indexer
+app.state.outline = outline
 app.state.retriever = retriever
 app.state.cancels = CancelRegistry()
 app.state.rag_tasks = set()

@@ -12,6 +12,8 @@ export type Book = {
   pagesTotal: number;
   pagesDone: number;
   textKey: string | null;
+  outline: string[];
+  outlineError: string | null;
   createdAt: string;
   updatedAt: string;
 };

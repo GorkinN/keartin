@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 JobStatus = Literal["queued", "indexing", "ready", "error"]
-JobPhase = Literal["parse", "ocr", "embed"]
+JobPhase = Literal["parse", "ocr", "embed", "outline"]
 
 
 @dataclass
@@ -20,6 +20,8 @@ class IndexJob:
     pages_total: int = 0
     pages_done: int = 0
     error: str | None = None
+    outline: list[str] | None = None
+    outline_error: str | None = None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -33,6 +35,8 @@ class IndexJob:
             "pages_total": self.pages_total,
             "pages_done": self.pages_done,
             "error": self.error,
+            "outline": list(self.outline or []),
+            "outline_error": self.outline_error,
         }
 
 

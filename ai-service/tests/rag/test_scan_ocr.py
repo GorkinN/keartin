@@ -171,3 +171,44 @@ def test_empty_text_error_is_rag_error() -> None:
     assert issubclass(EmptyTextError, RagError)
     with pytest.raises(RagError):
         raise EmptyTextError("Parsed text is empty: x.pdf")
+
+
+def test_outline_failure_leaves_book_ready(tmp_path: Path) -> None:
+    pdf = write_pdf(tmp_path / "source.pdf")
+
+    async def boom(chunks: list[str]) -> list[str]:
+        assert chunks
+        raise RuntimeError("Outline failed: bad json")
+
+    jobs = JobStore()
+    store = FakeStore()
+    indexer = Indexer(Settings(), FakeEmbedder(), store, jobs, ocr=FakeOcr(), outline=boom)  # type: ignore[arg-type]
+    job = jobs.create(book_id="b1", source_name="text.pdf")
+
+    asyncio.run(indexer.run(job, pdf))
+
+    assert job.status == "ready", job.error
+    assert job.phase == "outline"
+    assert job.outline == []
+    assert job.outline_error == "Не удалось собрать оглавление."
+    assert store.texts
+
+
+def test_outline_success_stores_titles(tmp_path: Path) -> None:
+    pdf = write_pdf(tmp_path / "source.pdf")
+
+    async def titles(chunks: list[str]) -> list[str]:
+        assert chunks
+        return ["Спрос и предложение"]
+
+    jobs = JobStore()
+    store = FakeStore()
+    indexer = Indexer(Settings(), FakeEmbedder(), store, jobs, outline=titles)  # type: ignore[arg-type]
+    job = jobs.create(book_id="b1", source_name="text.pdf")
+
+    asyncio.run(indexer.run(job, pdf))
+
+    assert job.status == "ready", job.error
+    assert job.outline == ["Спрос и предложение"]
+    assert job.outline_error is None
+    assert job.as_dict()["outline"] == ["Спрос и предложение"]

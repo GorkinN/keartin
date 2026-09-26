@@ -35,6 +35,8 @@ export type IndexStatus = {
   pages_total: number;
   pages_done: number;
   error: string | null;
+  outline: string[];
+  outline_error: string | null;
 };
 
 @Injectable()
@@ -97,6 +99,13 @@ export class PythonClient {
       method: "DELETE",
       timeoutMs: 30_000,
     });
+  }
+
+  async outlineBook(bookId: string): Promise<{ items: string[]; error: string | null }> {
+    return this.json<{ items: string[]; error: string | null }>(
+      `/rag/books/${encodeURIComponent(bookId)}/outline`,
+      { method: "POST", timeoutMs: 2 * 60 * 60 * 1000 },
+    );
   }
 
   async stream(

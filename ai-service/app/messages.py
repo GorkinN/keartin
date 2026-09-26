@@ -12,6 +12,7 @@ OCR_NO_CUDA = "Для распознавания скана нужна виде�
 BAD_FORMAT = "Формат файла не поддерживается."
 NO_CHUNKS = "Из файла не получилось нарезать фрагменты."
 INDEX_FAILED = "Не удалось проиндексировать книгу."
+OUTLINE_FAILED = "Не удалось собрать оглавление."
 CANCELLED = "отменено"
 
 
@@ -42,4 +43,6 @@ def public_message(exc: BaseException) -> str:
         return NO_CHUNKS
     if lowered.startswith("indexing failed"):
         return INDEX_FAILED
+    if lowered.startswith("outline failed"):
+        return OUTLINE_FAILED
     return text

@@ -7,9 +7,11 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from app.messages import public_message
 from app.rag.errors import RagError
 from app.rag.indexer import Indexer
 from app.rag.jobs import JobStore
+from app.rag.outline import OutlineWriter
 from app.rag.qdrant_store import QdrantStore
 from app.rag.retriever import Retriever
 
@@ -39,6 +41,8 @@ class IndexStatus(BaseModel):
     pages_total: int
     pages_done: int
     error: str | None = None
+    outline: list[str] = Field(default_factory=list)
+    outline_error: str | None = None
 
 
 class SearchRequest(BaseModel):
@@ -65,6 +69,11 @@ class DeleteResponse(BaseModel):
     book_id: str
 
 
+class OutlineResponse(BaseModel):
+    items: list[str]
+    error: str | None = None
+
+
 def _jobs(request: Request) -> JobStore:
     return request.app.state.rag_jobs
 
@@ -79,6 +88,10 @@ def _retriever(request: Request) -> Retriever:
 
 def _store(request: Request) -> QdrantStore:
     return request.app.state.qdrant
+
+
+def _outline(request: Request) -> OutlineWriter:
+    return request.app.state.outline
 
 
 @router.post("/index", status_code=202, response_model=IndexAccepted)
@@ -124,3 +137,21 @@ async def delete_book(book_id: str, request: Request) -> DeleteResponse:
     except RagError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     return DeleteResponse(ok=True, book_id=book_id)
+
+
+@router.post("/books/{book_id}/outline", response_model=OutlineResponse)
+async def build_outline(book_id: str, request: Request) -> OutlineResponse:
+    try:
+        stored = await _store(request).list_chunks(book_id)
+    except RagError as exc:
+        return OutlineResponse(items=[], error=public_message(exc))
+    chunks = [text for _, text in stored if text.strip()]
+    if not chunks:
+        raise HTTPException(status_code=400, detail="В книге нет фрагментов для оглавления.")
+    try:
+        items = await _outline(request)(chunks)
+    except Exception as exc:
+        return OutlineResponse(items=[], error=public_message(exc))
+    if not items:
+        return OutlineResponse(items=[], error="Не удалось собрать оглавление.")
+    return OutlineResponse(items=items, error=None)

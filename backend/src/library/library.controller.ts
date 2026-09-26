@@ -46,6 +46,11 @@ export class LibraryController {
     return this.library.reindex(id);
   }
 
+  @Post("books/:id/outline")
+  outline(@Param("id") id: string) {
+    return this.library.outline(id);
+  }
+
   @Delete("books/:id")
   remove(@Param("id") id: string) {
     return this.library.remove(id);

@@ -1,4 +1,5 @@
 import type { Book } from "@prisma/client";
+import { parseStringArray } from "../common/json";
 
 export type BookDto = {
   id: string;
@@ -14,6 +15,8 @@ export type BookDto = {
   pagesTotal: number;
   pagesDone: number;
   textKey: string | null;
+  outline: string[];
+  outlineError: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -33,6 +36,8 @@ export function toBookDto(book: Book): BookDto {
     pagesTotal: book.pagesTotal,
     pagesDone: book.pagesDone,
     textKey: book.textKey,
+    outline: parseStringArray(book.outline),
+    outlineError: book.outlineError,
     createdAt: book.createdAt.toISOString(),
     updatedAt: book.updatedAt.toISOString(),
   };
@@ -51,6 +56,8 @@ export function bookMeta(book: Book): string {
       chunksTotal: book.chunksTotal,
       chunksDone: book.chunksDone,
       pagesTotal: book.pagesTotal,
+      outline: parseStringArray(book.outline),
+      outlineError: book.outlineError,
       updatedAt: book.updatedAt.toISOString(),
     },
     null,

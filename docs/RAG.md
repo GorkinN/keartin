@@ -51,7 +51,11 @@ PDF без текстового слоя (только картинки, тип�
 
 `POST /rag/index` — `{ "path", "book_id"?, "source_name"? }` → `202` `{ job_id, book_id, status }`. Файл должен существовать. Нет `book_id` — UUID. Джобы в памяти процесса (рестарт FastAPI их стирает; векторы в Qdrant остаются). Одна книга за раз.
 
-`GET /rag/index/{job_id}` — `queued | indexing | ready | error`, плюс `chunks_done` / `chunks_total`, `phase` (`parse | ocr | embed`) и `pages_done` / `pages_total` для OCR. Nest пишет их в `Book.phase` / `pagesDone` / `pagesTotal`, библиотека показывает «страница N/M».
+`GET /rag/index/{job_id}` — `queued | indexing | ready | error`, плюс `chunks_done` / `chunks_total`, `phase` (`parse | ocr | embed | outline`), `pages_done` / `pages_total` для OCR, `outline` и `outline_error`. Nest пишет прогресс в `Book`. Пока фаза `outline`, библиотека показывает «оглавление». Ошибка этого шага оставляет джобу `ready`: чанки на месте, `outline` пустой, `outline_error` заполнен.
+
+`POST /rag/books/{book_id}/outline` — собирает оглавление по уже сохранённым чанкам, без эмбеда. Ответ `{ items, error }`. Пустой `error` и непустой `items` — успех. Ошибка в поле `error`, HTTP остаётся 200, чтобы прежний список у книги можно было не стирать. Нет чанков — `400`.
+
+Пункты — короткие строки на языке книги. Позже их можно выбрать темой поста. В поиск и в промпт генерации они не передаются.
 
 `POST /rag/search` — `{ "query", "book_ids": [], "top_k"? }` → `{ hits: [{ book_id, chunk_index, source_name, lang, text, score }] }`.
 
@@ -62,5 +66,7 @@ PDF без текстового слоя (только картинки, тип�
 ## GPU
 
 Эмбеды lock GpuManager не берут: `device="cpu"`. Не гонять индекс параллельно с Flux без нужды (оба трогают torch/RAM).
+
+Оглавление после эмбеда берёт тенант `llm` (та же модель, что пишет пост, `num_ctx=8192`, `think: false`). В окно попадают куски около 1200 символов, не больше ~12 000 символов суммарно, первый и последний фрагмент всегда остаются. Пока идёт оглавление, другая книга может эмбедиться: индексный lock уже отпущен, GPU ждёт свою очередь.
 
 OCR скана берёт тенант `ocr` на всю книгу (~10 с на страницу). Генерация поста в это время ждёт тот же lock, UI показывает «GPU занят: распознавание скана». Другие книги ждут индексный lock.

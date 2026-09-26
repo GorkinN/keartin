@@ -26,6 +26,7 @@
 | `POST` | `/library/books` | multipart поле `file` (pdf, epub, fb2, docx, txt, до 200 МБ). `202` и книга, статус `indexing`. Nest копирует файл в storage и только потом вызывает `POST /rag/index` с тем же `book_id`. |
 | `GET` | `/library/books`, `/library/books/:id` | список / одна. Прогресс чанков Nest пишет сам, опрашивая Python |
 | `POST` | `/library/books/:id/reindex` | `202`. Пока статус `indexing` — `409` |
+| `POST` | `/library/books/:id/outline` | книга в `ready`. Собирает оглавление по чанкам заново, без переиндексации. `indexing` — `409`. Успех заменяет `outline`. Ошибка пишет `outlineError` и оставляет прежний список |
 | `DELETE` | `/library/books/:id` | векторы через Python, затем storage. Посты не удаляются. `indexing` → `409`. Python недоступен → `502`, книга остаётся |
 | `GET/POST/PATCH/DELETE` | `/presets` | `name`, `description` (после trim не короче 10 символов), `examples` (до 5, необязательны). Пустое описание — `400`. Удаление пресета обнуляет `presetId` у постов |
 | `GET/POST/PATCH/DELETE` | `/image-presets` | `name`, `prompt` (после trim от 10 до 4000 символов). Стиль картинки, отдельно от пресета текста. Удаление обнуляет `imagePresetId` у постов |
@@ -106,7 +107,8 @@ TRANSFORMERS_CACHE=D:/huggingface_cache/transformers
 - `POST /rag/search` — `{ query, book_ids[], top_k? }` default 10. Пустой `book_ids` — вся коллекция.
 - `DELETE /rag/books/{book_id}` — только векторы.
 - Payload чанка: `book_id`, `chunk_index`, `source_name`, `lang`, `text`. Cosine 1024.
-- Эмбеды на CPU, GpuManager не трогаем. Одна индексная джоба за раз (свой lock, не GPU).
+- Эмбеды на CPU, GpuManager не трогаем. Одна индексная джоба за раз (свой lock, не GPU). После чанков фаза `outline`: один вызов LLM под `acquire("llm")` уже без индексного lock. Ошибка оглавления не отменяет `ready`.
+- `outline` — JSON-массив коротких пунктов, будущие темы поста. В поиск и в промпт генерации не входит. Ручной повтор: `POST /library/books/:id/outline`.
 - Скан PDF без текстового слоя → OCR DeepSeek-OCR-2 под тенантом `ocr`, текст в `library/<id>/source.txt` рядом с `source.pdf`, дальше обычная индексация. Готовый `source.txt` переиспользуется.
 
 Подробности: [RAG.md](RAG.md).

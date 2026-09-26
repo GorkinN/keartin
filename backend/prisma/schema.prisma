@@ -21,6 +21,8 @@ model Book {
   pagesTotal  Int      @default(0)
   pagesDone   Int      @default(0)
   textKey     String?
+  outline     String   @default("[]")
+  outlineError String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }

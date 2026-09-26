@@ -101,6 +101,27 @@ class QdrantStore:
         ]
         await self._client.upsert(collection_name=self._collection, points=points, wait=True)
 
+    async def list_chunks(self, book_id: str) -> list[tuple[int, str]]:
+        await self.ensure_collection(1024)
+        query_filter = Filter(must=[FieldCondition(key="book_id", match=MatchValue(value=book_id))])
+
+        async def fetch(cursor: Any) -> tuple[list[Any], Any]:
+            return await self._client.scroll(
+                collection_name=self._collection,
+                scroll_filter=query_filter,
+                limit=256,
+                offset=cursor,
+                with_payload=True,
+                with_vectors=False,
+            )
+
+        found: list[tuple[int, str]] = []
+        for point in await scroll_all(fetch):
+            payload: dict[str, Any] = point.payload or {}
+            found.append((int(payload.get("chunk_index", 0)), str(payload.get("text", ""))))
+        found.sort(key=lambda item: item[0])
+        return found
+
     async def search(
         self,
         *,
@@ -133,6 +154,19 @@ class QdrantStore:
                 )
             )
         return hits
+
+
+async def scroll_all(fetch: Any) -> list[Any]:
+    """Read every scroll page. An empty page is not the end while the cursor advances."""
+    found: list[Any] = []
+    cursor = None
+    while True:
+        records, nxt = await fetch(cursor)
+        found.extend(records)
+        if nxt is None or nxt == cursor:
+            break
+        cursor = nxt
+    return found
 
 
 def _vector_size(info: Any) -> int | None:

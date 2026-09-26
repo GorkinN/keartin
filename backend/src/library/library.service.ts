@@ -96,6 +96,33 @@ export class LibraryService {
     return toBookDto(updated);
   }
 
+  async outline(id: string): Promise<BookDto> {
+    const book = await this.prisma.book.findUnique({ where: { id } });
+    if (!book) throw new NotFoundException("книга не найдена");
+    if (book.status === "indexing") {
+      throw new ConflictException("дождитесь конца индексации");
+    }
+    if (book.status !== "ready") {
+      throw new ConflictException("сначала дождитесь индексации");
+    }
+    let result: { items: string[]; error: string | null };
+    try {
+      result = await this.python.outlineBook(id);
+    } catch (error) {
+      const message = error instanceof PythonRequestError ? error.message : "AI-сервис недоступен";
+      return this.saveOutlineError(id, message);
+    }
+    if (result.error || result.items.length === 0) {
+      return this.saveOutlineError(id, result.error || "Не удалось собрать оглавление.");
+    }
+    const updated = await this.prisma.book.update({
+      where: { id },
+      data: { outline: JSON.stringify(result.items), outlineError: null },
+    });
+    await this.writeMeta(updated);
+    return toBookDto(updated);
+  }
+
   async remove(id: string): Promise<{ ok: true }> {
     const book = await this.prisma.book.findUnique({ where: { id } });
     if (!book) throw new NotFoundException("книга не найдена");
@@ -132,6 +159,8 @@ export class LibraryService {
         phase: "",
         pagesDone: 0,
         pagesTotal: 0,
+        outline: "[]",
+        outlineError: null,
       },
     });
     await this.writeMeta(indexing);
@@ -221,6 +250,8 @@ export class LibraryService {
       chunks_total: number;
       pages_done?: number;
       pages_total?: number;
+      outline?: string[];
+      outline_error?: string | null;
     } | null,
   ): Promise<void> {
     const book = await this.prisma.book.findUnique({ where: { id: bookId } });
@@ -235,10 +266,25 @@ export class LibraryService {
         chunksTotal: index?.chunks_total ?? book.chunksTotal,
         pagesDone: index?.pages_done ?? book.pagesDone,
         pagesTotal: index?.pages_total ?? book.pagesTotal,
+        ...(status === "ready"
+          ? {
+              outline: JSON.stringify(index?.outline ?? []),
+              outlineError: index?.outline_error ?? null,
+            }
+          : {}),
       },
     });
     await this.writeMeta(updated);
     this.stops.delete(bookId);
+  }
+
+  private async saveOutlineError(id: string, message: string): Promise<BookDto> {
+    const updated = await this.prisma.book.update({
+      where: { id },
+      data: { outlineError: message },
+    });
+    await this.writeMeta(updated);
+    return toBookDto(updated);
   }
 
   private async localIndexPath(storageKey: string, bookId: string): Promise<string> {
