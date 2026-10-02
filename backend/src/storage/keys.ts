@@ -1,7 +1,7 @@
 const PREFIX =
-  /^(library|posts)\/[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/;
+  /^(library|posts|images)\/[A-Za-z0-9][A-Za-z0-9._-]{0,120}$/;
 const KEY =
-  /^(library|posts)\/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
+  /^(library|posts|images)\/[A-Za-z0-9][A-Za-z0-9._-]{0,120}\/[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function assertStoragePrefix(prefix: string): void {
   if (!PREFIX.test(prefix)) {

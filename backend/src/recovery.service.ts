@@ -20,6 +20,14 @@ export class RecoveryService implements OnModuleInit {
       where: { status: "running" },
       data: { status: "failed", error: RESTART_JOB },
     });
+    await this.prisma.imageJob.updateMany({
+      where: { status: "running" },
+      data: { status: "failed", error: RESTART_JOB },
+    });
+    await this.prisma.imageBatch.updateMany({
+      where: { status: "running" },
+      data: { status: "failed", error: RESTART_JOB },
+    });
     await this.prisma.post.updateMany({
       where: {
         status: "draft",

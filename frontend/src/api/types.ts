@@ -112,3 +112,37 @@ export type GenerateQueue = {
 
 export type KnowledgeMode = "rag" | "rag_plus" | "general";
 export type PostLength = "S" | "M" | "L";
+
+export type ImageFile = {
+  index: number;
+  seed: number;
+};
+
+export type ImageBatch = {
+  id: string;
+  prompt: string;
+  width: number;
+  height: number;
+  steps: number;
+  seed: number | null;
+  count: number;
+  status: string;
+  error: string | null;
+  images: ImageFile[];
+  activeJobId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ImageQueueItem = {
+  jobId: string;
+  batchId: string;
+  prompt: string;
+  count: number;
+  status: "queued" | "running";
+};
+
+export type ImageQueue = {
+  cooldownUntil: string | null;
+  items: ImageQueueItem[];
+};

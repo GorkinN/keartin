@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 const links = [
   { to: "/", label: "Библиотека" },
   { to: "/create", label: "Создать" },
+  { to: "/images", label: "Картинки" },
   { to: "/history", label: "История" },
   { to: "/presets", label: "Шаблоны" },
 ];

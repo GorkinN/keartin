@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { consumeSse, flushSse } from "../src/ai/sse";
 import { batchSeed, parseGenerateInput } from "../src/generate/input";
+import { parseImageBatchInput } from "../src/images/input";
 import { localDateStamp, nextStoragePrefix, slugifyTopic } from "../src/posts/slug";
+import { assertStorageKey, assertStoragePrefix } from "../src/storage/keys";
 
 assert.equal(batchSeed(null, 0, 3), null);
 assert.equal(batchSeed(42, 0, 1), 42);
@@ -12,6 +14,19 @@ assert.equal(batchSeed(2_147_483_647, 1, 2), 0);
 assert.equal(parseGenerateInput({ topic: "тема" }).withImage, true);
 assert.equal(parseGenerateInput({ topic: "тема", withImage: false }).withImage, false);
 assert.throws(() => parseGenerateInput({ topic: "тема", withImage: "no" }));
+
+const imageBatch = parseImageBatchInput({ prompt: "  a red fox  ", count: 2, steps: 22, width: 512, height: 512 });
+assert.equal(imageBatch.prompt, "a red fox");
+assert.equal(imageBatch.count, 2);
+assert.equal(imageBatch.steps, 22);
+assert.equal(imageBatch.seed, null);
+assert.equal(parseImageBatchInput({ prompt: "cat" }).steps, 20);
+assert.throws(() => parseImageBatchInput({ prompt: "cat", width: 1000 }));
+assert.throws(() => parseImageBatchInput({ prompt: "   " }));
+assert.throws(() => parseImageBatchInput({ prompt: "cat", count: 21 }));
+assert.doesNotThrow(() => assertStoragePrefix("images/clh3batch"));
+assert.doesNotThrow(() => assertStorageKey("images/clh3batch/0.png"));
+assert.throws(() => assertStoragePrefix("other/abc"));
 
 assert.equal(slugifyTopic("цена и спрос"), "tsena-i-spros");
 assert.equal(slugifyTopic("  Привет, мир!  "), "privet-mir");

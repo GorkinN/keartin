@@ -102,3 +102,44 @@ model GenerationJob {
 
   @@index([postId, status])
 }
+
+model ImageBatch {
+  id        String           @id @default(cuid())
+  prompt    String
+  width     Int
+  height    Int
+  steps     Int
+  seed      Int?
+  count     Int
+  status    String           @default("queued")
+  error     String?
+  fluxModel String           @default("")
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  images    GeneratedImage[]
+  job       ImageJob?
+}
+
+model GeneratedImage {
+  id         String     @id @default(cuid())
+  batchId    String
+  batch      ImageBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  index      Int
+  seed       Int
+  storageKey String
+  createdAt  DateTime   @default(now())
+
+  @@unique([batchId, index])
+}
+
+model ImageJob {
+  id        String     @id
+  batchId   String     @unique
+  batch     ImageBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  status    String
+  error     String?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@index([status, createdAt])
+}

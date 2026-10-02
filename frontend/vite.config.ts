@@ -10,6 +10,15 @@ const nestProxy: ProxyOptions = {
   proxyTimeout: 0,
 };
 
+const imagesProxy: ProxyOptions = {
+  ...nestProxy,
+  bypass(req) {
+    const accept = req.headers.accept;
+    const header = Array.isArray(accept) ? accept.join(",") : (accept ?? "");
+    if (header.includes("text/html")) return "/index.html";
+  },
+};
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -27,6 +36,7 @@ export default defineConfig({
       "/image-presets": nestProxy,
       "/tone-presets": nestProxy,
       "/generate": nestProxy,
+      "/images": imagesProxy,
       "/gpu": nestProxy,
       "/health": nestProxy,
     },

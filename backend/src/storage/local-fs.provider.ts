@@ -16,6 +16,7 @@ export class LocalFsProvider extends StorageProvider {
   async init(): Promise<void> {
     await mkdir(join(this.root, "library"), { recursive: true });
     await mkdir(join(this.root, "posts"), { recursive: true });
+    await mkdir(join(this.root, "images"), { recursive: true });
     await mkdir(join(this.root, "sqlite"), { recursive: true });
     await mkdir(join(this.root, "tmp", "index"), { recursive: true });
     await mkdir(join(this.root, "tmp", "pipeline"), { recursive: true });

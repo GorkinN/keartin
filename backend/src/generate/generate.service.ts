@@ -19,6 +19,7 @@ import { AppEnv } from "../config/env";
 import { PostFiles } from "../posts/post-files";
 import { nextStoragePrefix } from "../posts/slug";
 import { PrismaService } from "../prisma/prisma.service";
+import { ImagesService } from "../images/images.service";
 import { batchSeed, parseGenerateInput, type GenerateInput } from "./input";
 import { JobHub } from "./job-hub";
 
@@ -32,6 +33,8 @@ export type QueueItem = {
   status: "queued" | "running";
 };
 
+type Claimed = { kind: "post"; id: string } | { kind: "image"; id: string };
+
 @Injectable()
 export class GenerateService implements OnApplicationBootstrap {
   private readonly logger = new Logger(GenerateService.name);
@@ -42,6 +45,7 @@ export class GenerateService implements OnApplicationBootstrap {
     private readonly env: AppEnv,
     private readonly files: PostFiles,
     private readonly hub: JobHub,
+    private readonly images: ImagesService,
   ) {}
 
   private pumping = false;
@@ -156,6 +160,18 @@ export class GenerateService implements OnApplicationBootstrap {
     throw new BadGatewayException("не удалось отменить генерацию");
   }
 
+  wake(): void {
+    this.kick();
+  }
+
+  currentCooldown(): string | null {
+    return this.cooldownUntil;
+  }
+
+  async releasedQueue(): Promise<void> {
+    await this.abortCooldownIfIdle();
+  }
+
   async gpuStatus() {
     try {
       return await this.python.gpuStatus();
@@ -267,30 +283,62 @@ export class GenerateService implements OnApplicationBootstrap {
       for (;;) {
         const job = await this.claimNext();
         if (!job) return;
-        await this.run(job.id);
+        await this.run(job);
         await this.pauseIfQueued();
       }
     } finally {
       this.pumping = false;
-      const more = await this.prisma.generationJob.count({ where: { status: "queued" } });
-      if (more > 0) this.kick();
+      if ((await this.queuedCount()) > 0) this.kick();
     }
   }
 
-  private async claimNext(): Promise<{ id: string } | null> {
+  private async queuedCount(): Promise<number> {
+    const [posts, images] = await Promise.all([
+      this.prisma.generationJob.count({ where: { status: "queued" } }),
+      this.prisma.imageJob.count({ where: { status: "queued" } }),
+    ]);
+    return posts + images;
+  }
+
+  private async claimNext(): Promise<Claimed | null> {
     for (;;) {
-      const job = await this.prisma.generationJob.findFirst({
+      const post = await this.prisma.generationJob.findFirst({
         where: { status: "queued" },
         orderBy: { createdAt: "asc" },
       });
-      if (!job) return null;
-      this.hub.open(job.id);
-      const claimed = await this.prisma.generationJob.updateMany({
-        where: { id: job.id, status: "queued" },
-        data: { status: "running" },
+      const image = await this.prisma.imageJob.findFirst({
+        where: { status: "queued" },
+        orderBy: { createdAt: "asc" },
       });
-      if (claimed.count === 1) return job;
-      this.hub.close(job.id);
+      if (!post && !image) return null;
+      const imageFirst =
+        image !== null && (post === null || image.createdAt.getTime() < post.createdAt.getTime());
+      if (!imageFirst && post) {
+        this.hub.open(post.id);
+        const claimed = await this.prisma.generationJob.updateMany({
+          where: { id: post.id, status: "queued" },
+          data: { status: "running" },
+        });
+        if (claimed.count === 1) return { kind: "post", id: post.id };
+        this.hub.close(post.id);
+        continue;
+      }
+      if (!image) return null;
+      this.hub.open(image.id);
+      const claimed = await this.prisma.$transaction(async (tx) => {
+        const updated = await tx.imageJob.updateMany({
+          where: { id: image.id, status: "queued" },
+          data: { status: "running" },
+        });
+        if (updated.count !== 1) return 0;
+        await tx.imageBatch.updateMany({
+          where: { id: image.batchId, status: "queued" },
+          data: { status: "running" },
+        });
+        return 1;
+      });
+      if (claimed === 1) return { kind: "image", id: image.id };
+      this.hub.close(image.id);
     }
   }
 
@@ -309,11 +357,9 @@ export class GenerateService implements OnApplicationBootstrap {
   }
 
   private async pauseIfQueued(): Promise<void> {
-    const pending = await this.prisma.generationJob.count({ where: { status: "queued" } });
-    if (pending === 0) return;
+    if ((await this.queuedCount()) === 0) return;
     await this.settleIfFree();
-    const still = await this.prisma.generationJob.count({ where: { status: "queued" } });
-    if (still === 0) return;
+    if ((await this.queuedCount()) === 0) return;
     const until = Date.now() + COOLDOWN_MS;
     this.cooldownUntil = new Date(until).toISOString();
     const abort = new AbortController();
@@ -321,8 +367,7 @@ export class GenerateService implements OnApplicationBootstrap {
     try {
       while (Date.now() < until) {
         if (abort.signal.aborted) return;
-        const left = await this.prisma.generationJob.count({ where: { status: "queued" } });
-        if (left === 0) return;
+        if ((await this.queuedCount()) === 0) return;
         await delay(Math.min(1000, until - Date.now()), abort.signal);
       }
     } finally {
@@ -332,8 +377,7 @@ export class GenerateService implements OnApplicationBootstrap {
   }
 
   private async abortCooldownIfIdle(): Promise<void> {
-    const left = await this.prisma.generationJob.count({ where: { status: "queued" } });
-    if (left === 0) this.cooldownAbort?.abort();
+    if ((await this.queuedCount()) === 0) this.cooldownAbort?.abort();
   }
 
   private async settleIfFree(): Promise<void> {
@@ -351,18 +395,20 @@ export class GenerateService implements OnApplicationBootstrap {
     }
   }
 
-  private async run(jobId: string): Promise<void> {
+  private async run(job: Claimed): Promise<void> {
     try {
-      await this.consume(jobId);
+      if (job.kind === "image") await this.images.consume(job.id);
+      else await this.consume(job.id);
     } catch (error) {
       if (!isMissingRecord(error)) {
         const message = error instanceof Error ? error.message : "ошибка генерации";
-        this.logger.error(`job ${jobId}: ${message}`);
-        await this.failOnce(jobId, message);
+        this.logger.error(`job ${job.id}: ${message}`);
+        if (job.kind === "image") await this.images.failOnce(job.id, message);
+        else await this.failOnce(job.id, message);
       }
     } finally {
-      this.imageSeeds.delete(jobId);
-      this.hub.close(jobId);
+      this.imageSeeds.delete(job.id);
+      this.hub.close(job.id);
     }
   }
 

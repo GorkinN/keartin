@@ -3,6 +3,7 @@ import { Layout } from "@/components/layout";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CreatePage } from "@/pages/create";
 import { HistoryDetailRoute, HistoryPage } from "@/pages/history";
+import { ImagesPage } from "@/pages/images";
 import { LibraryPage } from "@/pages/library";
 import { PresetsPage } from "@/pages/presets";
 
@@ -14,6 +15,7 @@ export function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<LibraryPage />} />
             <Route path="/create" element={<CreatePage />} />
+            <Route path="/images" element={<ImagesPage />} />
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/history/:id" element={<HistoryDetailRoute />} />
             <Route path="/presets" element={<PresetsPage />} />
