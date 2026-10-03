@@ -26,10 +26,12 @@
 
 Текстовый `/generate/text` после ответа **не** форсирует unload (как этап 1: `keep_alive` из запроса, дефолт `5m`). Выгрузка — только при `acquire("flux")`.
 
+Слои LLM сначала занимают GPU. `num_gpu` не форсируется: на Windows большое значение уходит в shared-память и может свалиться в файл подкачки. Если веса не влезают в VRAM, но хвост не больше 12 ГБ, запросу ставятся `use_mmap: false` и `use_mlock: true`, чтобы этот хвост жил в RAM, а не читался с диска на каждом токене. Иначе генерация останавливается: выгрузка весов на SSD отключена.
+
 ## Flux
 
 - Repo: `FLUX_MODEL_ID=black-forest-labs/FLUX.1-dev` из `HF_HOME`. `local_files_only=True`. Снимок без LICENSE/README всё равно принимается, если есть `model_index.json` и `transformer/`.
-- **NF4** (transformer + T5) + `enable_model_cpu_offload()`. `enable_sequential_cpu_offload()` с bitsandbytes на T5 даёт `Cannot copy out of meta tensor`.
+- Веса сначала целиком на GPU, если влезают в свободную видеопамять (с запасом ~1 ГБ под активации). Иначе NF4 остаётся в RAM и считается на GPU через `enable_model_cpu_offload()` — sequential offload с bitsandbytes на T5 даёт `Cannot copy out of meta tensor`. Потолок RAM для весов генерации — 12 ГБ. Папка offload на диск не задаётся: слои не пишутся на SSD. Процесс ограничен свободной dedicated VRAM, чтобы Windows не добрала память через shared GPU / файл подкачки.
 - `FLUX_QUANT=gguf` + `FLUX_MODEL_PATH` — запасной путь в том же модуле. NF4 на этой машине загрузился.
 - Не FP16/BF16 пайплайн, не BnB8, не Flux в Docker.
 - После generate: `del pipe`, `gc.collect()`, `torch.cuda.empty_cache()`, `ipc_collect()`.
@@ -40,7 +42,7 @@
 
 Отдельный интерпретатор `ai-service/.venv-qwen` (`scripts/setup-qwen-venv.ps1`, torch и torchvision с индекса cu126). FastAPI его не импортирует: на время генерации под тенантом `flux` запускается процесс `python -m app.image.qwen_worker` в этом окружении, после картинки процесс завершается и видеопамять освобождается. Веса `Qwen/Qwen-Image-2.1` качаются в `HF_HOME` скриптом `scripts/download-qwen-image.ps1`, `local_files_only=True`.
 
-Если BF16 не влезает в 12 ГБ, воркер включает `enable_model_cpu_offload()`. Если во время шага не хватает памяти на весь transformer, тот же процесс перезагружает пайплайн через `enable_sequential_cpu_offload()`. Полный `.to("cuda")` не вызывается. После выхода процесса родитель снова ждёт свободную VRAM.
+Safetensors текстового энкодера (~16 ГБ) загружаются с `disable_mmap=True`. Иначе файл остаётся отображённым с SSD: в диспетчере задач RAM и VRAM почти пустые, а каждый слой читается с диска. GGUF transformer (~4 ГБ) и VAE ставятся на GPU раньше энкодера. Хвост энкодера, который не влез в видеопамять, живёт в RAM, не больше 12 ГБ, обычным выделением памяти, не mmap. Если весь объём весов влезает в эти 12 ГБ, а целиком в VRAM нет, включается `enable_model_cpu_offload()`. Повторный CUDA OOM с полного GPU один раз уходит на этот запас RAM. После выхода процесса родитель снова ждёт свободную VRAM.
 
 `QWEN_MODEL_PATH` — первый GGUF только для transformer (как `FLUX_MODEL_PATH`). `QWEN_MODEL_PATHS` — дополнительные файлы через `;`. Форма показывает их по имени файла и не принимает произвольный путь. Текстовый энкодер и VAE всё равно берутся из `Qwen/Qwen-Image-2.1` в `HF_HOME`. Если задан хотя бы один GGUF, `scripts/download-qwen-image.ps1` не качает веса transformer.
 

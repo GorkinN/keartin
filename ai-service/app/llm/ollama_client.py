@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 from collections.abc import AsyncIterator
@@ -7,6 +8,8 @@ from typing import Any
 
 import httpx
 
+from app.gpu.nvidia import vram_free_bytes
+from app.image.placement import PlacementError, llm_memory_options
 from app.settings import Settings
 
 
@@ -33,11 +36,41 @@ class OllamaClient:
     def model(self) -> str:
         return self._model
 
-    def _options(self, temperature: float | None) -> dict[str, Any]:
+    async def _options(self, temperature: float | None) -> dict[str, Any]:
         options: dict[str, Any] = {"num_ctx": self._num_ctx}
         if temperature is not None:
             options["temperature"] = temperature
+        # num_gpu is left unset so Ollama fills dedicated VRAM first. Forcing a
+        # high layer count on Windows uses shared GPU memory and can page to SSD.
+        try:
+            options.update(
+                llm_memory_options(
+                    await self._model_weight_bytes(),
+                    await asyncio.to_thread(vram_free_bytes),
+                )
+            )
+        except PlacementError as exc:
+            raise OllamaError(str(exc), status_code=400) from exc
         return options
+
+    async def _model_weight_bytes(self) -> int | None:
+        timeout = httpx.Timeout(connect=5.0, read=10.0, write=10.0, pool=5.0)
+        try:
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+                response = await client.post(
+                    f"{self._host}/api/show",
+                    json={"model": self._model},
+                )
+        except httpx.HTTPError:
+            return None
+        if response.status_code >= 400:
+            return None
+        try:
+            data = response.json()
+        except json.JSONDecodeError:
+            return None
+        size = data.get("size") if isinstance(data, dict) else None
+        return size if isinstance(size, int) and size > 0 else None
 
     def _resolve_keep_alive(self, keep_alive: str | int | None) -> str | int:
         if keep_alive is None:
@@ -57,7 +90,7 @@ class OllamaClient:
             "messages": messages,
             "stream": True,
             "keep_alive": self._resolve_keep_alive(keep_alive),
-            "options": self._options(temperature),
+            "options": await self._options(temperature),
             "think": False,
         }
         async for chunk in self._ndjson_stream("/api/chat", payload, stop=stop):
@@ -79,7 +112,7 @@ class OllamaClient:
             "prompt": prompt,
             "stream": True,
             "keep_alive": self._resolve_keep_alive(keep_alive),
-            "options": self._options(temperature),
+            "options": await self._options(temperature),
             "think": False,
         }
         if system:

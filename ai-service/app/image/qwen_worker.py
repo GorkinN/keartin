@@ -45,8 +45,8 @@ def _run(job: dict[str, Any]) -> None:
     mask = job.get("mask")
     if mask:
         images.append(Image.open(str(mask)))
-    pipe = _load_pipe(model_id, sequential=False, gguf_path=gguf_path)
-    sequential = False
+    pipe = _load_pipe(model_id, gguf_path=gguf_path)
+    retried = False
     for spec in job["items"]:
         if _cancelled(cancel_path):
             _emit({"event": "cancelled"})
@@ -70,21 +70,33 @@ def _run(job: dict[str, Any]) -> None:
                 on_step=on_step,
             )
         except RuntimeError as exc:
-            if sequential or not _is_oom(exc):
+            from app.image.placement import is_cuda_oom, place_pipeline
+            from app.messages import GENERATION_OOM
+
+            if not is_cuda_oom(exc) or retried or getattr(pipe, "_generation_placement", "") != "cuda":
+                if is_cuda_oom(exc):
+                    raise RuntimeError(GENERATION_OOM) from exc
                 raise
-            _log(f"model cpu offload ran out of memory ({exc}); switching to sequential offload")
-            pipe = _reload_sequential(pipe, model_id, gguf_path)
-            sequential = True
-            image = _generate(
-                pipe,
-                prompt=prompt,
-                images=[frame.copy() for frame in images],
-                width=width,
-                height=height,
-                steps=steps,
-                seed=seed,
-                on_step=on_step,
-            )
+            _log("gpu out of memory; retrying with at most 12 GiB RAM")
+            retried = True
+            _release_cuda()
+            pipe._generation_placement = place_pipeline(pipe, prefer_full_gpu=False)
+            _log(f"qwen placement: {pipe._generation_placement}")
+            try:
+                image = _generate(
+                    pipe,
+                    prompt=prompt,
+                    images=[frame.copy() for frame in images],
+                    width=width,
+                    height=height,
+                    steps=steps,
+                    seed=seed,
+                    on_step=on_step,
+                )
+            except RuntimeError as retry_exc:
+                if is_cuda_oom(retry_exc):
+                    raise RuntimeError(GENERATION_OOM) from retry_exc
+                raise
         if _cancelled(cancel_path):
             _emit({"event": "cancelled"})
             return
@@ -94,11 +106,31 @@ def _run(job: dict[str, Any]) -> None:
     _emit({"event": "done"})
 
 
-def _load_pipe(model_id: str, *, sequential: bool, gguf_path: str = "") -> Any:
+def _load_pipe(model_id: str, *, gguf_path: str = "") -> Any:
     import torch
     from diffusers import QwenImage21Pipeline
+    from transformers import Qwen3VLForConditionalGeneration
 
-    kwargs: dict[str, Any] = {"torch_dtype": torch.bfloat16, "local_files_only": True}
+    from app.image.placement import memory_report, place_pipeline
+
+    # The text encoder is a transformers model. Diffusers only forwards
+    # disable_mmap to its own classes, so this 16GB safetensors load would
+    # stay mapped on the SSD and barely touch RAM or VRAM.
+    text_encoder = Qwen3VLForConditionalGeneration.from_pretrained(
+        model_id,
+        subfolder="text_encoder",
+        torch_dtype=torch.bfloat16,
+        local_files_only=True,
+        low_cpu_mem_usage=True,
+        disable_mmap=True,
+    )
+    kwargs: dict[str, Any] = {
+        "torch_dtype": torch.bfloat16,
+        "local_files_only": True,
+        "offload_state_dict": False,
+        "disable_mmap": True,
+        "text_encoder": text_encoder,
+    }
     if gguf_path:
         from diffusers import GGUFQuantizationConfig, QwenImage21Transformer2DModel
 
@@ -113,23 +145,10 @@ def _load_pipe(model_id: str, *, sequential: bool, gguf_path: str = "") -> Any:
         _log(f"qwen transformer: gguf {Path(gguf_path).name}")
     pipe = QwenImage21Pipeline.from_pretrained(model_id, **kwargs)
     pipe.set_progress_bar_config(disable=True)
-    if sequential:
-        pipe.enable_sequential_cpu_offload()
-        _log("qwen offload: sequential_cpu_offload")
-    else:
-        pipe.enable_model_cpu_offload()
-        _log("qwen offload: model_cpu_offload")
-    return pipe
-
-
-def _reload_sequential(pipe: Any, model_id: str, gguf_path: str = "") -> Any:
-    import torch
-
-    del pipe
     gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-    return _load_pipe(model_id, sequential=True, gguf_path=gguf_path)
+    pipe._generation_placement = place_pipeline(pipe)
+    _log(f"qwen placement: {pipe._generation_placement}; {memory_report(pipe)}")
+    return pipe
 
 
 def _generate(
@@ -167,8 +186,13 @@ def _generate(
 
     kwargs["callback_on_step_end"] = callback
     kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
-    result = pipe(**kwargs)
-    return result.images[0]
+    from app.image.placement import park_staged_weights
+
+    try:
+        result = pipe(**kwargs)
+        return result.images[0]
+    finally:
+        park_staged_weights(pipe)
 
 
 def _assert_this_venv() -> None:
@@ -197,6 +221,9 @@ def _release_cuda() -> None:
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
+        from app.image.placement import release_vram_cap
+
+        release_vram_cap()
 
 
 def _assert_cached(model_id: str, *, gguf: bool = False) -> None:
@@ -228,11 +255,6 @@ def _cancelled(path: Path) -> bool:
         return path.is_file() and path.read_text(encoding="utf-8").strip() == "1"
     except OSError:
         return False
-
-
-def _is_oom(exc: BaseException) -> bool:
-    text = str(exc).lower()
-    return "out of memory" in text
 
 
 def _emit(payload: dict[str, Any]) -> None:

@@ -5,6 +5,14 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from app.image.placement import (
+    PlacementError,
+    is_cuda_oom,
+    park_staged_weights,
+    place_pipeline,
+    release_vram_cap,
+)
+from app.messages import GENERATION_OOM
 from app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -24,6 +32,7 @@ class FluxPipelineHolder:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._pipe: Any = None
+        self._placement = "cuda"
 
     @property
     def loaded(self) -> bool:
@@ -49,7 +58,8 @@ class FluxPipelineHolder:
                     "Set FLUX_QUANT=gguf and FLUX_MODEL_PATH to a GGUF transformer."
                 ) from exc
         self._pipe.set_progress_bar_config(disable=True)
-        logger.info("flux loaded")
+        self._place(prefer_full_gpu=True, unload_on_error=True)
+        logger.info("flux loaded placement=%s", self._placement)
 
     def unload(self) -> None:
         if self._pipe is None:
@@ -71,6 +81,7 @@ class FluxPipelineHolder:
                 torch.cuda.ipc_collect()
             except Exception:
                 pass
+        release_vram_cap()
         logger.info("flux unloaded")
 
     def generate(
@@ -84,6 +95,47 @@ class FluxPipelineHolder:
         on_step: Callable[[int, int], None] | None = None,
     ) -> Any:
         self.load()
+        try:
+            return self._forward(
+                prompt=prompt,
+                width=width,
+                height=height,
+                steps=steps,
+                seed=seed,
+                on_step=on_step,
+            )
+        except RuntimeError as exc:
+            if self._placement != "cuda" or not is_cuda_oom(exc):
+                if is_cuda_oom(exc):
+                    raise FluxError(GENERATION_OOM) from exc
+                raise
+            logger.warning("flux GPU out of memory; retrying with at most 12 GiB RAM")
+            self._release_cuda_cache()
+            self._place(prefer_full_gpu=False, unload_on_error=False)
+            try:
+                return self._forward(
+                    prompt=prompt,
+                    width=width,
+                    height=height,
+                    steps=steps,
+                    seed=seed,
+                    on_step=on_step,
+                )
+            except RuntimeError as retry_exc:
+                if is_cuda_oom(retry_exc):
+                    raise FluxError(GENERATION_OOM) from retry_exc
+                raise
+
+    def _forward(
+        self,
+        *,
+        prompt: str,
+        width: int,
+        height: int,
+        steps: int,
+        seed: int,
+        on_step: Callable[[int, int], None] | None = None,
+    ) -> Any:
         import torch
 
         generator = torch.Generator("cpu").manual_seed(int(seed) % (2**32))
@@ -105,8 +157,28 @@ class FluxPipelineHolder:
             kwargs["callback_on_step_end"] = callback
             kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
 
-        result = self._pipe(**kwargs)
-        return result.images[0]
+        try:
+            result = self._pipe(**kwargs)
+            return result.images[0]
+        finally:
+            park_staged_weights(self._pipe)
+
+    def _place(self, *, prefer_full_gpu: bool, unload_on_error: bool) -> None:
+        try:
+            self._placement = place_pipeline(self._pipe, prefer_full_gpu=prefer_full_gpu)
+        except PlacementError as exc:
+            if unload_on_error:
+                self.unload()
+            raise FluxError(str(exc)) from exc
+
+    def _release_cuda_cache(self) -> None:
+        import gc
+
+        import torch
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _local_kwargs(self) -> dict[str, Any]:
         import torch
@@ -153,13 +225,12 @@ class FluxPipelineHolder:
             pipe = FluxPipeline.from_pretrained(
                 self._settings.flux_model_id,
                 quantization_config=quant,
+                offload_state_dict=False,
                 **self._local_kwargs(),
             )
         except Exception as exc:
             logger.warning("pipeline NF4 quant failed (%s); trying component-wise", exc)
             pipe = self._load_nf4_components()
-        # sequential_cpu_offload + bitsandbytes hits meta-tensor errors on T5.
-        _enable_offload(pipe, prefer_sequential=False)
         return pipe
 
     def _load_nf4_components(self) -> Any:
@@ -196,6 +267,7 @@ class FluxPipelineHolder:
             self._settings.flux_model_id,
             transformer=transformer,
             text_encoder_2=text_encoder_2,
+            offload_state_dict=False,
             **local,
         )
 
@@ -216,31 +288,9 @@ class FluxPipelineHolder:
             quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
             torch_dtype=torch.bfloat16,
         )
-        pipe = FluxPipeline.from_pretrained(
+        return FluxPipeline.from_pretrained(
             self._settings.flux_model_id,
             transformer=transformer,
+            offload_state_dict=False,
             **self._local_kwargs(),
         )
-        _enable_offload(pipe, prefer_sequential=False)
-        return pipe
-
-
-def _enable_offload(pipe: Any, *, prefer_sequential: bool = True) -> None:
-    if prefer_sequential:
-        try:
-            pipe.enable_sequential_cpu_offload()
-            logger.info("flux offload: sequential_cpu_offload")
-            return
-        except Exception as exc:
-            logger.warning("sequential_cpu_offload failed (%s); trying model_cpu_offload", exc)
-        pipe.enable_model_cpu_offload()
-        logger.info("flux offload: model_cpu_offload")
-        return
-    try:
-        pipe.enable_model_cpu_offload()
-        logger.info("flux offload: model_cpu_offload")
-        return
-    except Exception as exc:
-        logger.warning("model_cpu_offload failed (%s); trying sequential_cpu_offload", exc)
-    pipe.enable_sequential_cpu_offload()
-    logger.info("flux offload: sequential_cpu_offload")

@@ -18,11 +18,22 @@ POLL_INTERVAL_S = 1.0
 
 
 def vram_used_mb() -> int | None:
+    return _query_gpu_mb("memory.used")
+
+
+def vram_free_bytes() -> int | None:
+    free_mb = _query_gpu_mb("memory.free")
+    if free_mb is None:
+        return None
+    return free_mb * 1024 * 1024
+
+
+def _query_gpu_mb(field: str) -> int | None:
     try:
         result = subprocess.run(
             [
                 "nvidia-smi",
-                "--query-gpu=memory.used",
+                f"--query-gpu={field}",
                 "--format=csv,noheader,nounits",
             ],
             capture_output=True,
