@@ -35,6 +35,14 @@ dependencies = [
 requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
+[project.optional-dependencies]
+qwen = [
+    "diffusers @ git+https://github.com/huggingface/diffusers.git@c60830ee365d520ab52b110dda562dd26f7b4d7f",
+    "transformers>=5.17",
+    "accelerate>=0.34.0",
+    "pillow>=10.0.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["app*"]

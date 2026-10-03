@@ -7,7 +7,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import type { Response } from "express";
 import { PythonClient, PythonRequestError } from "../ai/python.client";
@@ -19,6 +19,16 @@ import { PrismaService } from "../prisma/prisma.service";
 import { StorageProvider } from "../storage/storage.provider";
 import { toImageBatchDto, type ImageBatchDto, type ImageQueueItem } from "./image.dto";
 import { parseImageBatchInput } from "./input";
+import { imageModelOfRepo, repoForImageModel } from "./limits";
+
+const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+export type UploadImage = {
+  buffer: Buffer;
+  mimetype: string;
+  originalname: string;
+  size: number;
+};
 
 const STORAGE_WRITE_ERROR = "Не удалось записать картинку.";
 
@@ -34,8 +44,22 @@ export class ImagesService {
     private readonly hub: JobHub,
   ) {}
 
-  async enqueue(body: unknown): Promise<{ jobId: string; batchId: string }> {
+  async enqueue(
+    body: unknown,
+    files?: { references?: UploadImage[]; mask?: UploadImage[] },
+  ): Promise<{ jobId: string; batchId: string }> {
     const input = parseImageBatchInput(body);
+    const references = files?.references ?? [];
+    const mask = files?.mask?.[0];
+    if (input.model !== "qwen" && (references.length > 0 || mask)) {
+      throw new BadRequestException("референсы и маска доступны только у Qwen-Image-2.1");
+    }
+    if (references.length > 10) throw new BadRequestException("не больше 10 референсов");
+    if (mask && references.length === 0) throw new BadRequestException("маске нужен референс");
+    if (references.length + (mask ? 1 : 0) > 10) {
+      throw new BadRequestException("вместе с маской не больше 10 изображений");
+    }
+    for (const file of [...references, ...(mask ? [mask] : [])]) assertImageFile(file);
     if (!(await this.python.reachable())) {
       throw new BadGatewayException("AI-сервис недоступен");
     }
@@ -49,10 +73,31 @@ export class ImagesService {
         seed: input.seed,
         count: input.count,
         status: "queued",
-        fluxModel: this.env.fluxModelId,
+        transparent: input.transparent,
+        gguf: input.model === "qwen" ? input.gguf : "",
+        fluxModel: repoForImageModel(input.model, this.env.fluxModelId, this.env.qwenImageModelId),
         job: { create: { id: jobId, status: "queued" } },
       },
     });
+    try {
+      const referenceKeys: string[] = [];
+      for (let index = 0; index < references.length; index += 1) {
+        const key = `images/${batch.id}/ref-${index}.png`;
+        await this.storage.putBytes(key, references[index].buffer);
+        referenceKeys.push(key);
+      }
+      const maskKey = mask ? `images/${batch.id}/mask.png` : "";
+      if (mask) await this.storage.putBytes(maskKey, mask.buffer);
+      if (referenceKeys.length > 0 || maskKey) {
+        await this.prisma.imageBatch.update({
+          where: { id: batch.id },
+          data: { referenceKeys: JSON.stringify(referenceKeys), maskKey },
+        });
+      }
+    } catch (error) {
+      await this.prisma.imageBatch.delete({ where: { id: batch.id } }).catch(() => undefined);
+      throw error;
+    }
     this.hub.open(jobId);
     return { jobId, batchId: batch.id };
   }
@@ -219,13 +264,24 @@ export class ImagesService {
       finished = true;
       await this.failOnce(jobId, message);
     };
+    const referenceKeys = parseKeys(job.batch.referenceKeys);
+    const referencePaths: string[] = [];
+    for (let index = 0; index < referenceKeys.length; index += 1) {
+      referencePaths.push(await this.materialize(referenceKeys[index], `ref-${index}.png`, jobId));
+    }
+    const maskPath = job.batch.maskKey ? await this.materialize(job.batch.maskKey, "mask.png", jobId) : undefined;
     const body: Record<string, unknown> = {
       prompt: job.batch.prompt,
+      model: imageModelOfRepo(job.batch.fluxModel, this.env.qwenImageModelId),
       width: job.batch.width,
       height: job.batch.height,
       steps: job.batch.steps,
       count: job.batch.count,
       job_id: jobId,
+      transparent: job.batch.transparent,
+      gguf: job.batch.gguf,
+      reference_paths: referencePaths,
+      ...(maskPath ? { mask_path: maskPath } : {}),
     };
     if (job.batch.seed !== null) body.seed = job.batch.seed;
     try {
@@ -327,6 +383,18 @@ export class ImagesService {
     });
   }
 
+  private async materialize(key: string, name: string, jobId: string): Promise<string> {
+    const absolute = this.storage.absolutePath(key);
+    if (absolute) return absolute;
+    const bytes = await this.storage.getBytes(key);
+    const dir = resolve(this.env.repoRoot, "data", "tmp", "images", jobId, "inputs");
+    await mkdir(dir, { recursive: true });
+    const file = resolve(dir, name);
+    if (!file.startsWith(dir + sep)) throw new Error("некорректный путь картинки");
+    await writeFile(file, bytes);
+    return file;
+  }
+
   private async readPng(jobId: string, index: number): Promise<Buffer> {
     if (!/^[A-Za-z0-9-]{1,80}$/.test(jobId)) throw new Error("некорректный путь картинки");
     const root = resolve(this.env.repoRoot, "data", "tmp", "images", jobId);
@@ -369,6 +437,22 @@ export class ImagesService {
       write({ event: "error", data: { message: current.error ?? "джоба прервана" } });
     }
     end();
+  }
+}
+
+function assertImageFile(file: UploadImage): void {
+  if (!file.buffer?.length) throw new BadRequestException("пустой файл изображения");
+  if (file.size > 25 * 1024 * 1024) throw new BadRequestException("изображение больше 25 МБ");
+  if (!IMAGE_TYPES.has(file.mimetype)) throw new BadRequestException("нужен PNG, JPEG или WebP");
+}
+
+function parseKeys(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) return [];
+    return parsed;
+  } catch {
+    return [];
   }
 }
 

@@ -7,6 +7,7 @@ const links = [
   { to: "/images", label: "Картинки" },
   { to: "/history", label: "История" },
   { to: "/presets", label: "Шаблоны" },
+  { to: "/config", label: "Конфигурация" },
 ];
 
 export function Layout() {

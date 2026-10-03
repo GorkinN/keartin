@@ -16,6 +16,8 @@ from app.bootstrap import repo_root
 from app.gpu.errors import GpuError
 from app.gpu.manager import GpuManager
 from app.image.flux_pipeline import FluxError, FluxPipelineHolder
+from app.image.limits import default_steps
+from app.image.runtime import ImageRuntime
 from app.llm.ollama_client import GenerationCancelled, OllamaClient, OllamaError
 from app.messages import CANCELLED, EMPTY_RAG, public_message
 from app.pipeline.cancel import CancelRegistry
@@ -63,6 +65,8 @@ class PostSpec:
     seed: int | None
     job_id: str | None
     image_style: str = ""
+    image_model: str = "flux"
+    gguf: str = ""
 
 
 @dataclass(frozen=True)
@@ -75,6 +79,8 @@ class ImageSpec:
     seed: int | None
     job_id: str | None
     image_style: str = ""
+    image_model: str = "flux"
+    gguf: str = ""
 
 
 def resolve_job_id(job_id: str | None) -> str:
@@ -210,7 +216,7 @@ async def iter_post_events(
     *,
     gpu: GpuManager,
     retriever: Retriever,
-    flux: FluxPipelineHolder,
+    images: ImageRuntime,
     client: OllamaClient,
     include_image: bool,
     cancels: CancelRegistry,
@@ -295,8 +301,8 @@ async def iter_post_events(
                 yield _cancelled()
             return
 
-        async for event in _iter_flux_phase(
-            flux,
+        async for event in _iter_image_phase(
+            images,
             gpu,
             job_id=job_id,
             prompt=image_prompt,
@@ -305,6 +311,8 @@ async def iter_post_events(
             steps=spec.steps,
             seed=spec.seed,
             stop=stop,
+            image_model=spec.image_model,
+            gguf=spec.gguf,
         ):
             yield event
     finally:
@@ -315,7 +323,7 @@ async def iter_image_events(
     spec: ImageSpec,
     *,
     gpu: GpuManager,
-    flux: FluxPipelineHolder,
+    images: ImageRuntime,
     client: OllamaClient,
     cancels: CancelRegistry,
 ) -> AsyncIterator[ServerSentEvent]:
@@ -374,8 +382,8 @@ async def iter_image_events(
                 yield _cancelled()
             return
 
-        async for event in _iter_flux_phase(
-            flux,
+        async for event in _iter_image_phase(
+            images,
             gpu,
             job_id=job_id,
             prompt=image_prompt,
@@ -384,6 +392,8 @@ async def iter_image_events(
             steps=spec.steps,
             seed=spec.seed,
             stop=stop,
+            image_model=spec.image_model,
+            gguf=spec.gguf,
         ):
             yield event
     finally:
@@ -406,6 +416,139 @@ async def _image_prompt_from_llm(
     if not prompt:
         raise PipelineError("пустой промпт картинки")
     return prompt
+
+
+async def _iter_image_phase(
+    images: ImageRuntime,
+    gpu: GpuManager,
+    *,
+    job_id: str,
+    prompt: str,
+    width: int,
+    height: int,
+    steps: int,
+    seed: int | None,
+    stop: threading.Event,
+    image_model: str = "flux",
+    gguf: str = "",
+) -> AsyncIterator[ServerSentEvent]:
+    if image_model == "qwen":
+        async for event in _iter_qwen_phase(
+            images,
+            gpu,
+            job_id=job_id,
+            prompt=prompt,
+            width=width,
+            height=height,
+            steps=steps or default_steps("qwen"),
+            seed=seed,
+            stop=stop,
+            gguf=gguf,
+        ):
+            yield event
+        return
+    async for event in _iter_flux_phase(
+        images.flux,
+        gpu,
+        job_id=job_id,
+        prompt=prompt,
+        width=width,
+        height=height,
+        steps=steps,
+        seed=seed,
+        stop=stop,
+    ):
+        yield event
+
+
+async def _iter_qwen_phase(
+    images: ImageRuntime,
+    gpu: GpuManager,
+    *,
+    job_id: str,
+    prompt: str,
+    width: int,
+    height: int,
+    steps: int,
+    seed: int | None,
+    stop: threading.Event,
+    gguf: str = "",
+) -> AsyncIterator[ServerSentEvent]:
+    if _stopped(stop):
+        yield _cancelled()
+        return
+    resolved_seed = seed if seed is not None else random.randint(0, 2**31 - 1)
+    try:
+        await gpu.acquire("flux")
+    except GpuError as exc:
+        yield _error(public_message(exc))
+        return
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[tuple[str, object, object | None]] = asyncio.Queue()
+    out = pipeline_dir(job_id) / "image.png"
+
+    def on_progress(index: int, step: int, total: int) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, ("progress", step, total))
+
+    def work() -> None:
+        try:
+            images.flux.unload()
+            status = images.qwen.run(
+                prompt=prompt,
+                width=width,
+                height=height,
+                steps=steps,
+                items=[{"index": 0, "seed": resolved_seed, "path": str(out)}],
+                image_paths=[],
+                mask_path=None,
+                transparent=False,
+                gguf=gguf,
+                cancel_path=pipeline_dir(job_id) / "cancel",
+                on_progress=on_progress,
+                stop=stop,
+            )
+            if status == "cancelled" or stop.is_set():
+                loop.call_soon_threadsafe(queue.put_nowait, ("cancelled", None, None))
+                return
+            loop.call_soon_threadsafe(queue.put_nowait, ("done", str(out), None))
+        except Exception as exc:
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", exc, None))
+
+    try:
+        yield ServerSentEvent(data={"ok": True}, event="gpu_unload_llm")
+        yield _status("load_flux", job_id)
+        future = loop.run_in_executor(None, work)
+        while True:
+            kind, first, second = await queue.get()
+            if kind == "progress":
+                yield ServerSentEvent(data={"step": first, "total": second}, event="image_progress")
+            elif kind == "done":
+                await future
+                yield ServerSentEvent(
+                    data={"path": first, "seed": resolved_seed, "prompt": prompt},
+                    event="image_done",
+                )
+                yield _status("unload_flux", job_id)
+                return
+            elif kind == "cancelled":
+                try:
+                    await future
+                except Exception:
+                    logger.exception("qwen pipeline cancel failed job=%s", job_id, extra={"job_id": job_id})
+                yield _cancelled()
+                return
+            else:
+                try:
+                    await future
+                except Exception:
+                    logger.exception("pipeline qwen failed job=%s", job_id, extra={"job_id": job_id})
+                yield _error(public_message(first if isinstance(first, BaseException) else FluxError("qwen failed")))
+                return
+    finally:
+        try:
+            await gpu.release()
+        except Exception as exc:
+            logger.warning("gpu release after pipeline qwen failed: %s", exc, extra={"job_id": job_id})
 
 
 async def _iter_flux_phase(

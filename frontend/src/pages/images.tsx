@@ -1,32 +1,38 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
+import { imageModelLabel, QWEN_SIZE_PRESETS, sideMax, stepBounds, type ImageModelId } from "@/api/image-model";
 import { formatWhen } from "@/api/labels";
 import { gpuBusyLabel, parseSeed } from "@/api/seed";
-import { IMAGE_STEPS, resolveSize, SIZE_PRESETS, type SizePresetId } from "@/api/sizes";
-import type { GpuStatus, ImageBatch, ImageQueue } from "@/api/types";
+import { resolveSize, SIZE_PRESETS } from "@/api/sizes";
+import type { AppConfig, GpuStatus, ImageBatch, ImageQueue } from "@/api/types";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { ErrorText } from "@/components/error-text";
 import { FieldLabel } from "@/components/field-hint";
+import { ImageModelSelect, QwenGgufSelect } from "@/components/image-model-select";
+import { ReferenceBoard, type ReferenceBoardHandle } from "@/components/reference-board";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectItem } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useImageJob } from "@/hooks/useImageJob";
 
-const STEP_MIN = 20;
-const STEP_MAX = 28;
-
 export function ImagesPage() {
+  const [imageModel, setImageModel] = useState<ImageModelId>("flux");
+  const [gguf, setGguf] = useState("");
   const [prompt, setPrompt] = useState("");
-  const [sizePreset, setSizePreset] = useState<SizePresetId>("square");
+  const [sizePreset, setSizePreset] = useState("square");
   const [customWidth, setCustomWidth] = useState("1024");
   const [customHeight, setCustomHeight] = useState("1024");
-  const [steps, setSteps] = useState(IMAGE_STEPS);
-  const [stepsText, setStepsText] = useState(String(IMAGE_STEPS));
+  const [steps, setSteps] = useState(stepBounds("flux").fallback);
+  const [stepsText, setStepsText] = useState(String(stepBounds("flux").fallback));
+  const [transparent, setTransparent] = useState(false);
+  const [mask, setMask] = useState<File | null>(null);
+  const board = useRef<ReferenceBoardHandle>(null);
   const [seedText, setSeedText] = useState("");
   const [count, setCount] = useState(1);
   const [countText, setCountText] = useState("1");
@@ -41,6 +47,11 @@ export function ImagesPage() {
   const queryClient = useQueryClient();
   const job = useImageJob();
 
+  const config = useQuery({
+    queryKey: ["config"],
+    queryFn: () => api<AppConfig>("/config"),
+  });
+  const ggufs = config.data?.qwen.ggufs ?? [];
   const gpu = useQuery({
     queryKey: ["gpu-status"],
     queryFn: () => api<GpuStatus>("/gpu/status"),
@@ -57,10 +68,12 @@ export function ImagesPage() {
     refetchInterval: (queue.data?.items.length ?? 0) > 0 ? 2000 : false,
   });
 
-  const size = resolveSize(sizePreset, customWidth, customHeight);
+  const bounds = stepBounds(imageModel);
+  const presets = imageModel === "qwen" ? QWEN_SIZE_PRESETS : SIZE_PRESETS;
+  const size = resolveSize(sizePreset, customWidth, customHeight, presets, sideMax(imageModel));
   const sizeError = "error" in size ? size.error : null;
   const seed = parseSeed(seedText);
-  const selectedSteps = parseSteps(stepsText);
+  const selectedSteps = parseSteps(stepsText, bounds.min, bounds.max);
   const selectedCount = parseCount(countText);
   const promptReady = prompt.trim().length > 0;
   const blocked = !promptReady || Boolean(sizeError) || Boolean(seed.error) || selectedSteps === null || selectedCount === null;
@@ -79,23 +92,46 @@ export function ImagesPage() {
     if (running) job.watch(running.jobId);
   }, [job.watch, running]);
 
+  useEffect(() => {
+    if (imageModel !== "qwen" || ggufs.length === 0) return;
+    setGguf((current) => (ggufs.some((item) => item.id === current) ? current : ggufs[0].id));
+  }, [ggufs, imageModel]);
+
+  const changeModel = (next: ImageModelId) => {
+    setImageModel(next);
+    setSizePreset("square");
+    const nextBounds = stepBounds(next);
+    setSteps(nextBounds.fallback);
+    setStepsText(String(nextBounds.fallback));
+    if (next === "flux") {
+      setTransparent(false);
+      setMask(null);
+    }
+  };
+
   const generate = () => {
     if (blocked || adding || selectedSteps === null || selectedCount === null) return;
     const width = "error" in size ? 1024 : size.width;
     const height = "error" in size ? 1024 : size.height;
     setEnqueueError(null);
     setAdding(true);
-    void api<{ jobId: string; batchId: string }>("/images", {
-      method: "POST",
-      body: JSON.stringify({
-        prompt: prompt.trim(),
-        width,
-        height,
-        steps: selectedSteps,
-        count: selectedCount,
-        ...(seed.value !== undefined ? { seed: seed.value } : {}),
-      }),
-    })
+    void (async () => {
+      const body = new FormData();
+      body.set("prompt", prompt.trim());
+      body.set("model", imageModel);
+      body.set("width", String(width));
+      body.set("height", String(height));
+      body.set("steps", String(selectedSteps));
+      body.set("count", String(selectedCount));
+      body.set("transparent", imageModel === "qwen" && transparent ? "true" : "false");
+      if (imageModel === "qwen" && gguf) body.set("gguf", gguf);
+      if (seed.value !== undefined) body.set("seed", String(seed.value));
+      if (imageModel === "qwen" && board.current) {
+        for (const file of await board.current.files()) body.append("references", file);
+        if (mask) body.append("mask", mask);
+      }
+      return api<{ jobId: string; batchId: string }>("/images", { method: "POST", body });
+    })()
       .then(() => {
         void queryClient.invalidateQueries({ queryKey: ["image-queue"] });
         void queryClient.invalidateQueries({ queryKey: ["image-batches"] });
@@ -145,8 +181,12 @@ export function ImagesPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Картинки</h1>
       <div className="space-y-4">
+        <ImageModelSelect id="image-model" value={imageModel} onChange={changeModel} />
+        {imageModel === "qwen" ? (
+          <QwenGgufSelect id="image-gguf" value={gguf} options={ggufs} onChange={setGguf} />
+        ) : null}
         <div className="space-y-1.5">
-          <FieldLabel htmlFor="image-prompt" hint="Текст уходит в Flux как есть. Английский промпт обычно даёт лучший результат.">
+          <FieldLabel htmlFor="image-prompt" hint="Текст уходит в модель как есть. Английский промпт обычно даёт лучший результат.">
             Промпт
           </FieldLabel>
           <Textarea
@@ -159,14 +199,17 @@ export function ImagesPage() {
         </div>
         <div className="space-y-1.5">
           <FieldLabel hint="Размер картинки.">Размер</FieldLabel>
-          <Select value={sizePreset} onValueChange={(value) => setSizePreset(value as SizePresetId)}>
-            {SIZE_PRESETS.map((item) => (
+          <Select value={sizePreset} onValueChange={setSizePreset}>
+            {presets.map((item) => (
               <SelectItem key={item.id} value={item.id}>
                 {item.width ? `${item.label} · ${item.width}×${item.height}` : item.label}
               </SelectItem>
             ))}
           </Select>
-          <p className="text-sm text-muted-foreground">От 256 до 1024, сторона кратна 16.</p>
+          <p className="text-sm text-muted-foreground">
+            От 256 до {sideMax(imageModel)}, сторона кратна 16.
+            {imageModel === "qwen" ? " Пресеты 2K медленные и могут не влезть в 12 ГБ." : ""}
+          </p>
           {sizePreset === "custom" ? (
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -199,18 +242,18 @@ export function ImagesPage() {
             <Input
               id="image-steps"
               inputMode="numeric"
-              min={STEP_MIN}
-              max={STEP_MAX}
+              min={bounds.min}
+              max={bounds.max}
               className="w-20"
               value={stepsText}
               onChange={(event) => {
                 const text = event.target.value;
                 setStepsText(text);
-                const parsed = parseSteps(text);
+                const parsed = parseSteps(text, bounds.min, bounds.max);
                 if (parsed !== null) setSteps(parsed);
               }}
               onBlur={() => {
-                const parsed = parseSteps(stepsText);
+                const parsed = parseSteps(stepsText, bounds.min, bounds.max);
                 if (parsed !== null) {
                   setSteps(parsed);
                   setStepsText(String(parsed));
@@ -221,8 +264,8 @@ export function ImagesPage() {
             />
             <input
               type="range"
-              min={STEP_MIN}
-              max={STEP_MAX}
+              min={bounds.min}
+              max={bounds.max}
               step={1}
               value={steps}
               aria-label="Шаги"
@@ -235,7 +278,7 @@ export function ImagesPage() {
             />
           </div>
           {selectedSteps === null ? (
-            <p className="text-sm text-muted-foreground">Укажите число от 20 до 28</p>
+            <p className="text-sm text-muted-foreground">Укажите число от {bounds.min} до {bounds.max}</p>
           ) : null}
         </div>
         <div className="space-y-1.5">
@@ -302,6 +345,26 @@ export function ImagesPage() {
           </div>
           {selectedCount === null ? <p className="text-sm text-muted-foreground">Укажите число от 1 до 20</p> : null}
         </div>
+        {imageModel === "qwen" ? (
+          <>
+            <ReferenceBoard ref={board} max={mask ? 9 : 10} />
+            <div className="space-y-1.5">
+              <FieldLabel htmlFor="image-mask" hint="Белые области маски нужно менять, чёрные оставить. Маска уходит вторым изображением после референсов.">
+                Маска
+              </FieldLabel>
+              <Input
+                id="image-mask"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={(event) => setMask(event.target.files?.[0] ?? null)}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <Switch id="image-transparent" checked={transparent} onCheckedChange={setTransparent} aria-label="Прозрачный фон" />
+              <Label htmlFor="image-transparent">Прозрачный фон</Label>
+            </div>
+          </>
+        ) : null}
         {!promptReady ? <p className="text-sm text-muted-foreground">Нужен промпт</p> : null}
         {gpuLabel ? <p className="text-sm text-muted-foreground">{gpuLabel}</p> : null}
         <ErrorText message={enqueueError} />
@@ -365,7 +428,11 @@ export function ImagesPage() {
               <div className="min-w-0 space-y-1">
                 <p className="whitespace-pre-wrap break-words text-sm">{batch.prompt}</p>
                 <p className="text-sm text-muted-foreground">
+                  {imageModelLabel(batch.model)}
+                  {batch.gguf ? ` · ${ggufs.find((item) => item.id === batch.gguf)?.label ?? batch.gguf}` : ""}
+                  {" · "}
                   {batchStatusLabel(batch.status)} · {formatWhen(batch.createdAt)} · {batch.width}×{batch.height} · {batch.steps} шагов
+                  {batch.transparent ? " · прозрачный фон" : ""}
                   {batch.seed !== null ? ` · seed ${batch.seed}` : ""}
                 </p>
               </div>
@@ -381,7 +448,7 @@ export function ImagesPage() {
                     <img
                       src={`/images/${batch.id}/files/${image.index}`}
                       alt=""
-                      className="w-full rounded-md bg-muted"
+                      className={`w-full rounded-md ${batch.transparent ? "checkerboard" : "bg-muted"}`}
                     />
                     <figcaption className="text-xs text-muted-foreground">seed {image.seed}</figcaption>
                   </figure>
@@ -431,10 +498,10 @@ function excerpt(prompt: string): string {
   return text.length > 80 ? `${text.slice(0, 80)}…` : text;
 }
 
-function parseSteps(text: string): number | null {
+function parseSteps(text: string, min: number, max: number): number | null {
   if (!/^\d+$/.test(text.trim())) return null;
   const value = Number(text.trim());
-  if (value < STEP_MIN || value > STEP_MAX) return null;
+  if (value < min || value > max) return null;
   return value;
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
-import type { ImagePromptPreset, Post } from "@/api/types";
+import type { AppConfig, ImagePromptPreset, Post } from "@/api/types";
 import type { GenerationKind } from "@/hooks/useGeneration";
 import { FieldLabel } from "@/components/field-hint";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectItem } from "@/components/ui/select";
 import { ErrorText } from "@/components/error-text";
+import { imageModelId, imageModelLabel, type ImageModelId } from "@/api/image-model";
+import { ImageModelSelect, QwenGgufSelect } from "@/components/image-model-select";
 import { parseSeed } from "@/api/seed";
 
 export function PostPreview({
@@ -38,7 +40,7 @@ export function PostPreview({
   cancelling?: boolean;
   onCancel?: () => void;
   onRegenerateText?: () => void;
-  onRegenerateImage?: (seed?: number, imagePresetId?: string | null) => void;
+  onRegenerateImage?: (seed?: number, imagePresetId?: string | null, imageModel?: ImageModelId, gguf?: string) => void;
   showHistoryLink?: boolean;
 }) {
   const text = liveText ?? post?.text ?? "";
@@ -46,18 +48,32 @@ export function PostPreview({
   const [imageFailed, setImageFailed] = useState(false);
   const [seedText, setSeedText] = useState("");
   const [imagePresetId, setImagePresetId] = useState(post?.imagePresetId ?? "none");
+  const [imageModel, setImageModel] = useState<ImageModelId>(imageModelId(post?.models.flux ?? ""));
+  const [gguf, setGguf] = useState(post?.gguf ?? "");
   const seed = parseSeed(seedText);
   const imagePresets = useQuery({
     queryKey: ["image-presets"],
     queryFn: () => api<ImagePromptPreset[]>("/image-presets"),
     enabled: Boolean(post && onRegenerateImage),
   });
+  const config = useQuery({
+    queryKey: ["config"],
+    queryFn: () => api<AppConfig>("/config"),
+    enabled: Boolean(post && onRegenerateImage),
+  });
+  const ggufs = config.data?.qwen.ggufs ?? [];
   useEffect(() => {
     setImageFailed(false);
   }, [post?.id, post?.updatedAt]);
   useEffect(() => {
     setImagePresetId(post?.imagePresetId ?? "none");
-  }, [post?.id, post?.imagePresetId]);
+    setImageModel(imageModelId(post?.models.flux ?? ""));
+    setGguf(post?.gguf ?? "");
+  }, [post?.id, post?.imagePresetId, post?.models.flux, post?.gguf]);
+  useEffect(() => {
+    if (imageModel !== "qwen" || ggufs.length === 0) return;
+    setGguf((current) => (ggufs.some((item) => item.id === current) ? current : ggufs[0].id));
+  }, [ggufs, imageModel]);
   const imagePercent = progress && progress.total > 0 ? (progress.step / progress.total) * 100 : 0;
 
   return (
@@ -92,6 +108,12 @@ export function PostPreview({
           onError={() => setImageFailed(true)}
         />
       ) : null}
+      {showImage && post ? (
+        <p className="text-sm text-muted-foreground">
+          {imageModelLabel(post.models.flux)}
+          {post.gguf ? ` · ${ggufs.find((item) => item.id === post.gguf)?.label ?? post.gguf}` : ""}
+        </p>
+      ) : null}
       {imageFailed ? <p className="text-sm text-destructive">Картинка не найдена</p> : null}
       {running && onCancel ? (
         <Button type="button" variant="outline" disabled={cancelling} onClick={onCancel}>
@@ -100,6 +122,12 @@ export function PostPreview({
       ) : null}
       {post && onRegenerateText && onRegenerateImage ? (
         <div className="space-y-3">
+          <div className="max-w-xs">
+            <ImageModelSelect id="regen-image-model" value={imageModel} onChange={setImageModel} />
+            {imageModel === "qwen" ? (
+              <QwenGgufSelect id="regen-gguf" value={gguf} options={ggufs} onChange={setGguf} />
+            ) : null}
+          </div>
           <div className="space-y-1.5">
             <FieldLabel href="/presets?tab=image" hint="Текст стиля учитывается при описании картинки.">
               Стиль картинки
@@ -142,7 +170,14 @@ export function PostPreview({
               type="button"
               variant="outline"
               disabled={running !== null || !post.text || Boolean(seed.error)}
-              onClick={() => onRegenerateImage(seed.value, imagePresetId === "none" ? null : imagePresetId)}
+              onClick={() =>
+                onRegenerateImage(
+                  seed.value,
+                  imagePresetId === "none" ? null : imagePresetId,
+                  imageModel,
+                  imageModel === "qwen" ? gguf : "",
+                )
+              }
             >
               {post.imageKey ? "Перегенерировать картинку" : "Сгенерировать картинку"}
             </Button>

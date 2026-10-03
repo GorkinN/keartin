@@ -3,8 +3,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
 import { gpuBusyLabel, parseSeed } from "@/api/seed";
 import { knowledgeLabel, lengthLabel } from "@/api/labels";
-import { IMAGE_STEPS, resolveSize, SIZE_PRESETS, type SizePresetId } from "@/api/sizes";
+import { imageModelId, QWEN_SIZE_PRESETS, sideMax, stepBounds, type ImageModelId } from "@/api/image-model";
+import { resolveSize, SIZE_PRESETS } from "@/api/sizes";
 import type {
+  AppConfig,
   Book,
   EnqueueResult,
   GenerateQueue,
@@ -19,6 +21,7 @@ import type {
 import { BookOutline } from "@/components/book-outline";
 import { ErrorText } from "@/components/error-text";
 import { FieldHint, FieldLabel } from "@/components/field-hint";
+import { ImageModelSelect, QwenGgufSelect } from "@/components/image-model-select";
 import { PostPreview } from "@/components/post-preview";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
@@ -48,8 +51,10 @@ export function CreatePage() {
   const [knowledgeMode, setKnowledgeMode] = useState<KnowledgeMode>("rag");
   const [presetId, setPresetId] = useState("none");
   const [withImage, setWithImage] = useState(true);
+  const [imageModel, setImageModel] = useState<ImageModelId>("flux");
+  const [gguf, setGguf] = useState("");
   const [imagePresetId, setImagePresetId] = useState("none");
-  const [sizePreset, setSizePreset] = useState<SizePresetId>("square");
+  const [sizePreset, setSizePreset] = useState("square");
   const [customWidth, setCustomWidth] = useState("1024");
   const [customHeight, setCustomHeight] = useState("1024");
   const [seedText, setSeedText] = useState("");
@@ -83,6 +88,11 @@ export function CreatePage() {
     queryKey: ["tone-presets"],
     queryFn: () => api<TonePreset[]>("/tone-presets"),
   });
+  const config = useQuery({
+    queryKey: ["config"],
+    queryFn: () => api<AppConfig>("/config"),
+  });
+  const ggufs = config.data?.qwen.ggufs ?? [];
   const gpu = useQuery({
     queryKey: ["gpu-status"],
     queryFn: () => api<GpuStatus>("/gpu/status"),
@@ -94,6 +104,11 @@ export function CreatePage() {
     refetchInterval: (query) => (query.state.data?.cooldownUntil ? 1000 : 2000),
   });
 
+  useEffect(() => {
+    if (imageModel !== "qwen" || ggufs.length === 0) return;
+    setGguf((current) => (ggufs.some((item) => item.id === current) ? current : ggufs[0].id));
+  }, [ggufs, imageModel]);
+
   const readyBooks = (books.data ?? []).filter((book) => book.status === "ready");
   const sourceNeedle = sourceQuery.trim().toLowerCase();
   const visibleBooks = sourceNeedle
@@ -104,7 +119,8 @@ export function CreatePage() {
       )
     : readyBooks;
   const visibleIds = visibleBooks.map((book) => book.id);
-  const size = resolveSize(sizePreset, customWidth, customHeight);
+  const sizePresets = imageModel === "qwen" ? QWEN_SIZE_PRESETS : SIZE_PRESETS;
+  const size = resolveSize(sizePreset, customWidth, customHeight, sizePresets, sideMax(imageModel));
   const sizeError = "error" in size ? size.error : null;
   const seed = parseSeed(seedText);
   const gpuLabel = gpuBusyLabel(gpu.data);
@@ -197,9 +213,11 @@ export function CreatePage() {
         presetId: presetId === "none" ? null : presetId,
         imagePresetId: imagePresetId === "none" ? null : imagePresetId,
         withImage,
+        imageModel,
+        ...(imageModel === "qwen" && gguf ? { gguf } : {}),
         width,
         height,
-        steps: IMAGE_STEPS,
+        steps: stepBounds(imageModel).fallback,
         count: selectedCount,
         ...(seed.value !== undefined ? { seed: seed.value } : {}),
       }),
@@ -405,6 +423,17 @@ export function CreatePage() {
               />
               <Collapse open={withImage}>
                 <div className="space-y-4">
+                  <ImageModelSelect
+                    id="post-image-model"
+                    value={imageModel}
+                    onChange={(next) => {
+                      setImageModel(next);
+                      setSizePreset("square");
+                    }}
+                  />
+                  {imageModel === "qwen" ? (
+                    <QwenGgufSelect id="post-gguf" value={gguf} options={ggufs} onChange={setGguf} />
+                  ) : null}
                   <div className="space-y-1.5">
                     <FieldLabel href="/presets?tab=image" hint="Текст стиля учитывается при описании картинки.">
                       Стиль картинки
@@ -421,14 +450,17 @@ export function CreatePage() {
                   </div>
                   <div className="space-y-1.5">
                     <FieldLabel hint="Размер картинки.">Размер</FieldLabel>
-                    <Select value={sizePreset} onValueChange={(value) => setSizePreset(value as SizePresetId)}>
-                      {SIZE_PRESETS.map((item) => (
+                    <Select value={sizePreset} onValueChange={setSizePreset}>
+                      {sizePresets.map((item) => (
                         <SelectItem key={item.id} value={item.id}>
                           {item.width ? `${item.label} · ${item.width}×${item.height}` : item.label}
                         </SelectItem>
                       ))}
                     </Select>
-                    <p className="text-sm text-muted-foreground">От 256 до 1024, сторона кратна 16.</p>
+                    <p className="text-sm text-muted-foreground">
+                      От 256 до {sideMax(imageModel)}, сторона кратна 16.
+                      {imageModel === "qwen" ? " Пресеты 2K медленные и могут не влезть в 12 ГБ." : ""}
+                    </p>
                     {sizePreset === "custom" ? (
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-1.5">
@@ -568,10 +600,12 @@ export function CreatePage() {
           }
           onRegenerateImage={
             post
-              ? (nextSeed, nextImagePresetId) =>
+              ? (nextSeed, nextImagePresetId, nextImageModel, nextGguf) =>
                   void generation.run("image", `/posts/${post.id}/regenerate-image`, {
                     ...(nextSeed === undefined ? {} : { seed: nextSeed }),
                     imagePresetId: nextImagePresetId ?? null,
+                    imageModel: nextImageModel ?? imageModelId(post.models.flux),
+                    ...(nextGguf ? { gguf: nextGguf } : {}),
                   })
               : undefined
           }

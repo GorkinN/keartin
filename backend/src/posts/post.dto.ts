@@ -25,6 +25,7 @@ export type PostDto = {
   storagePrefix: string;
   slug: string;
   models: { llm: string; flux: string };
+  gguf: string;
   sources: SourceRef[];
   status: string;
   activeJobId: string | null;
@@ -57,6 +58,7 @@ export function toPostDto(post: Post, activeJobId: string | null): PostDto {
     storagePrefix: post.storagePrefix,
     slug: post.slug,
     models: { llm: post.llmModel, flux: post.fluxModel },
+    gguf: post.gguf,
     sources: parseSources(post.sources),
     status: post.status,
     activeJobId,

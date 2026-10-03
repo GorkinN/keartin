@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import { isRecord } from "../common/json";
+import { imageBounds, parseImageModel, type ImageModel } from "../images/limits";
 
 export type KnowledgeMode = "rag" | "rag_plus" | "general";
 export type PostLength = "S" | "M" | "L";
@@ -25,6 +26,8 @@ export type GenerateInput = {
   seed: number | null;
   count: number;
   withImage: boolean;
+  imageModel: ImageModel;
+  imageGguf: string;
 };
 
 const SEED_SPAN = 2_147_483_648;
@@ -61,18 +64,24 @@ export function parseGenerateInput(body: unknown): GenerateInput {
     body.temperature === undefined || body.temperature === null
       ? null
       : optionalNumber(body.temperature, 0, 2, "temperature");
-  const width = optionalInt(body.width, 1024, 256, 1024, "width");
-  const height = optionalInt(body.height, 1024, 256, 1024, "height");
+  const imageModel = parseImageModel(body.imageModel);
+  const bounds = imageBounds(imageModel);
+  const width = optionalInt(body.width, 1024, bounds.sideMin, bounds.sideMax, "width");
+  const height = optionalInt(body.height, 1024, bounds.sideMin, bounds.sideMax, "height");
   if (width % 16 !== 0 || height % 16 !== 0) {
     throw new BadRequestException("width и height должны делиться на 16");
   }
-  const steps = optionalInt(body.steps, 28, 20, 28, "steps");
+  const steps = optionalInt(body.steps, imageModel === "qwen" ? 40 : 28, bounds.stepMin, bounds.stepMax, "steps");
   const seed =
     body.seed === undefined || body.seed === null
       ? null
       : optionalInt(body.seed, 0, 0, 2_147_483_647, "seed");
   const count = optionalInt(body.count, 1, 1, 20, "count");
   const withImage = optionalBoolean(body.withImage, true, "withImage");
+  const imageGguf = optionalGguf(body.gguf);
+  if (imageModel !== "qwen" && imageGguf) {
+    throw new BadRequestException("выбор GGUF доступен только у Qwen-Image-2.1");
+  }
   return {
     topic,
     tone,
@@ -94,7 +103,19 @@ export function parseGenerateInput(body: unknown): GenerateInput {
     seed,
     count,
     withImage,
+    imageModel,
+    imageGguf,
   };
+}
+
+function optionalGguf(value: unknown): string {
+  if (value === undefined || value === null || value === "") return "";
+  if (typeof value !== "string") throw new BadRequestException("gguf должен быть именем файла");
+  const text = value.trim();
+  if (text.length > 200 || text.includes("/") || text.includes("\\") || text.includes("..")) {
+    throw new BadRequestException("gguf должен быть именем файла");
+  }
+  return text;
 }
 
 function parseStructure(value: unknown): { hooks: boolean; body: boolean; cta: boolean } {

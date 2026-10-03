@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     flux_model_id: str = "black-forest-labs/FLUX.1-dev"
     flux_quant: str = "nf4"
     flux_model_path: str = ""
+    qwen_image_model_id: str = "Qwen/Qwen-Image-2.1"
+    qwen_python: str = ""
+    qwen_model_path: str = ""
+    qwen_model_paths: str = ""
     ocr_model_id: str = "deepseek-community/DeepSeek-OCR-2"
     ocr_dpi: int = 144
     ocr_max_patches: int = 6

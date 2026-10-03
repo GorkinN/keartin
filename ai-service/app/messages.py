@@ -8,6 +8,10 @@ BAD_FILE = "Не удалось прочитать файл."
 EMPTY_FILE = "В файле нет текста."
 EMPTY_OCR = "Распознавание скана не нашло текста."
 OCR_MISSING = "Модель распознавания сканов не скачана. Запустите scripts/download-ocr.ps1."
+QWEN_MISSING = "Модель Qwen-Image-2.1 не скачана. Запустите scripts/download-qwen-image.ps1."
+QWEN_GGUF_BASE_MISSING = "GGUF — это только transformer. Текстовый энкодер и VAE всё ещё нужны в кэше Hugging Face. Запустите scripts/download-qwen-image.ps1."
+QWEN_PYTHON_MISSING = "Окружение Qwen не найдено. Запустите scripts/setup-qwen-venv.ps1."
+QWEN_GGUF_UNKNOWN = "Такого файла GGUF нет в настройках. Проверьте QWEN_MODEL_PATH и QWEN_MODEL_PATHS."
 OCR_NO_CUDA = "Для распознавания скана нужна видеокарта CUDA."
 BAD_FORMAT = "Формат файла не поддерживается."
 NO_CHUNKS = "Из файла не получилось нарезать фрагменты."
@@ -37,6 +41,14 @@ def public_message(exc: BaseException) -> str:
         return EMPTY_OCR
     if lowered.startswith("ocr weights for"):
         return OCR_MISSING
+    if lowered.startswith("qwen weights") and "gguf" in lowered:
+        return QWEN_GGUF_BASE_MISSING
+    if lowered.startswith("qwen weights"):
+        return QWEN_MISSING
+    if lowered.startswith("qwen python"):
+        return QWEN_PYTHON_MISSING
+    if lowered.startswith("qwen gguf"):
+        return QWEN_GGUF_UNKNOWN
     if lowered.startswith("cuda is unavailable for ocr"):
         return OCR_NO_CUDA
     if lowered.startswith("no chunks"):

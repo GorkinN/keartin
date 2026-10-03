@@ -6,10 +6,11 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.gpu.manager import GpuManager
-from app.image.flux_pipeline import FluxPipelineHolder
+from app.image.limits import default_steps, validate_image_request
+from app.image.runtime import ImageRuntime
 from app.llm.ollama_client import OllamaClient
 from app.pipeline.cancel import CancelRegistry
 from app.pipeline.post_pipeline import (
@@ -69,9 +70,11 @@ class PostPipelineRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=20)
     preset: PresetIn | None = None
     temperature: float | None = Field(default=None, ge=0, le=2)
-    width: int | None = Field(default=None, ge=256, le=1024)
-    height: int | None = Field(default=None, ge=256, le=1024)
-    steps: int | None = Field(default=None, ge=20, le=28)
+    image_model: Literal["flux", "qwen"] = "flux"
+    gguf: str = ""
+    width: int | None = None
+    height: int | None = None
+    steps: int | None = None
     seed: int | None = None
     job_id: str | None = None
     image_style: str = ""
@@ -98,13 +101,6 @@ class PostPipelineRequest(BaseModel):
                 seen.append(book_id)
         return seen
 
-    @field_validator("width", "height")
-    @classmethod
-    def multiple_of_16(cls, value: int | None) -> int | None:
-        if value is not None and value % 16 != 0:
-            raise ValueError("width and height must be multiples of 16")
-        return value
-
     @field_validator("job_id")
     @classmethod
     def valid_job_id(cls, value: str | None) -> str | None:
@@ -121,6 +117,17 @@ class PostPipelineRequest(BaseModel):
     @classmethod
     def strip_image_style(cls, value: str) -> str:
         return _clean_image_style(value)
+
+    @model_validator(mode="after")
+    def check_image_limits(self) -> PostPipelineRequest:
+        try:
+            validate_image_request(self.image_model, self.width, self.height, self.steps)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        self.gguf = _clean_pipeline_gguf(self.gguf)
+        if self.image_model != "qwen" and self.gguf:
+            raise ValueError("gguf requires model qwen")
+        return self
 
     def to_spec(self) -> PostSpec:
         preset = self.preset or PresetIn()
@@ -141,19 +148,23 @@ class PostPipelineRequest(BaseModel):
             temperature=self.temperature,
             width=self.width or 1024,
             height=self.height or 1024,
-            steps=self.steps or 28,
+            steps=self.steps if self.steps is not None else default_steps(self.image_model),
             seed=self.seed,
             job_id=self.job_id,
             image_style=self.image_style,
+            image_model=self.image_model,
+            gguf=self.gguf,
         )
 
 
 class ImagePipelineRequest(BaseModel):
     text: str = Field(min_length=1)
     temperature: float | None = Field(default=None, ge=0, le=2)
-    width: int | None = Field(default=None, ge=256, le=1024)
-    height: int | None = Field(default=None, ge=256, le=1024)
-    steps: int | None = Field(default=None, ge=20, le=28)
+    image_model: Literal["flux", "qwen"] = "flux"
+    gguf: str = ""
+    width: int | None = None
+    height: int | None = None
+    steps: int | None = None
     seed: int | None = None
     job_id: str | None = None
     image_style: str = ""
@@ -165,13 +176,6 @@ class ImagePipelineRequest(BaseModel):
         if not text:
             raise ValueError("text is required")
         return text
-
-    @field_validator("width", "height")
-    @classmethod
-    def multiple_of_16(cls, value: int | None) -> int | None:
-        if value is not None and value % 16 != 0:
-            raise ValueError("width and height must be multiples of 16")
-        return value
 
     @field_validator("job_id")
     @classmethod
@@ -190,16 +194,29 @@ class ImagePipelineRequest(BaseModel):
     def strip_image_style(cls, value: str) -> str:
         return _clean_image_style(value)
 
+    @model_validator(mode="after")
+    def check_image_limits(self) -> ImagePipelineRequest:
+        try:
+            validate_image_request(self.image_model, self.width, self.height, self.steps)
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        self.gguf = _clean_pipeline_gguf(self.gguf)
+        if self.image_model != "qwen" and self.gguf:
+            raise ValueError("gguf requires model qwen")
+        return self
+
     def to_spec(self) -> ImageSpec:
         return ImageSpec(
             text=self.text,
             temperature=self.temperature,
             width=self.width or 1024,
             height=self.height or 1024,
-            steps=self.steps or 28,
+            steps=self.steps if self.steps is not None else default_steps(self.image_model),
             seed=self.seed,
             job_id=self.job_id,
             image_style=self.image_style,
+            image_model=self.image_model,
+            gguf=self.gguf,
         )
 
 
@@ -207,8 +224,8 @@ def _gpu(request: Request) -> GpuManager:
     return request.app.state.gpu
 
 
-def _flux(request: Request) -> FluxPipelineHolder:
-    return request.app.state.flux
+def _images(request: Request) -> ImageRuntime:
+    return request.app.state.images
 
 
 def _retriever(request: Request) -> Retriever:
@@ -242,7 +259,7 @@ async def pipeline_stream(
         spec,
         gpu=_gpu(request),
         retriever=_retriever(request),
-        flux=_flux(request),
+        images=_images(request),
         client=OllamaClient(get_settings()),
         include_image=True,
         cancels=_cancels(request),
@@ -260,7 +277,7 @@ async def pipeline_text_stream(
         spec,
         gpu=_gpu(request),
         retriever=_retriever(request),
-        flux=_flux(request),
+        images=_images(request),
         client=OllamaClient(get_settings()),
         include_image=False,
         cancels=_cancels(request),
@@ -278,8 +295,17 @@ async def pipeline_image_stream(
     async for event in iter_image_events(
         spec,
         gpu=_gpu(request),
-        flux=_flux(request),
+        images=_images(request),
         client=OllamaClient(get_settings()),
         cancels=_cancels(request),
     ):
         yield event
+
+
+def _clean_pipeline_gguf(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    if len(text) > 200 or "/" in text or "\\" in text or ".." in text:
+        raise ValueError("invalid gguf")
+    return text

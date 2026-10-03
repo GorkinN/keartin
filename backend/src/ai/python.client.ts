@@ -17,6 +17,13 @@ export type IndexAccepted = {
   status: string;
 };
 
+export type AppConfig = {
+  llm: { model: string; num_ctx: number; keep_alive: string; host: string };
+  embed: { model: string };
+  flux: { model: string; quant: string; path: string };
+  ocr: { model: string; dpi: number; max_patches: number; max_new_tokens: number };
+};
+
 export type GpuStatus = {
   locked: boolean;
   tenant: string | null;
@@ -74,6 +81,10 @@ export class PythonClient {
       throw new PythonRequestError(await readError(response), response.status);
     }
     return (await response.json()) as IndexStatus;
+  }
+
+  async appConfig(): Promise<AppConfig> {
+    return this.json<AppConfig>("/config", { method: "GET", timeoutMs: 10_000 });
   }
 
   async gpuStatus(): Promise<GpuStatus> {

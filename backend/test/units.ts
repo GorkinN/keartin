@@ -21,6 +21,19 @@ assert.equal(imageBatch.count, 2);
 assert.equal(imageBatch.steps, 22);
 assert.equal(imageBatch.seed, null);
 assert.equal(parseImageBatchInput({ prompt: "cat" }).steps, 20);
+assert.equal(parseImageBatchInput({ prompt: "cat" }).model, "flux");
+assert.equal(parseImageBatchInput({ prompt: "cat", model: "qwen" }).steps, 40);
+assert.equal(
+  parseImageBatchInput({ prompt: "cat", model: "qwen", width: "2048", height: "2048", steps: "40", transparent: "true" }).transparent,
+  true,
+);
+assert.throws(() => parseImageBatchInput({ prompt: "cat", transparent: true }));
+assert.equal(parseGenerateInput({ topic: "тема" }).imageGguf, "");
+assert.equal(parseGenerateInput({ topic: "тема", imageModel: "qwen", gguf: "qwen-image-2.1-UC-Q4_K_M.gguf" }).imageGguf, "qwen-image-2.1-UC-Q4_K_M.gguf");
+assert.throws(() => parseGenerateInput({ topic: "тема", gguf: "qwen.gguf" }));
+assert.throws(() => parseImageBatchInput({ prompt: "cat", model: "qwen", gguf: "C:/weights/qwen.gguf" }));
+assert.equal(parseGenerateInput({ topic: "тема" }).imageModel, "flux");
+assert.equal(parseGenerateInput({ topic: "тема", imageModel: "qwen", width: 2048, height: 2048 }).steps, 40);
 assert.throws(() => parseImageBatchInput({ prompt: "cat", width: 1000 }));
 assert.throws(() => parseImageBatchInput({ prompt: "   " }));
 assert.throws(() => parseImageBatchInput({ prompt: "cat", count: 21 }));

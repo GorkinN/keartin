@@ -49,6 +49,7 @@ export type Post = {
   storagePrefix: string;
   slug: string;
   models: { llm: string; flux: string };
+  gguf?: string;
   sources: SourceRef[];
   status: string;
   activeJobId: string | null;
@@ -79,6 +80,16 @@ export type Preset = {
   examples: string[];
   createdAt: string;
   updatedAt: string;
+};
+
+export type QwenGguf = { id: string; label: string };
+
+export type AppConfig = {
+  llm: { model: string; num_ctx: number; keep_alive: string; host: string };
+  embed: { model: string };
+  flux: { model: string; quant: string; path: string };
+  qwen: { model: string; python_ready: boolean; path?: string; ggufs?: QwenGguf[] };
+  ocr: { model: string; dpi: number; max_patches: number; max_new_tokens: number };
 };
 
 export type GpuStatus = {
@@ -128,6 +139,9 @@ export type ImageBatch = {
   count: number;
   status: string;
   error: string | null;
+  model: string;
+  transparent: boolean;
+  gguf?: string;
   images: ImageFile[];
   activeJobId: string | null;
   createdAt: string;

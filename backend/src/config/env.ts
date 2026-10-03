@@ -40,6 +40,8 @@ export class AppEnv {
   readonly s3SecretKey: string;
   readonly llmModel: string;
   readonly fluxModelId: string;
+  readonly qwenImageModelId: string;
+  readonly qwenPython: string;
 
   constructor() {
     ignoreLocalProxy();
@@ -51,5 +53,7 @@ export class AppEnv {
     this.s3SecretKey = process.env.S3_SECRET_KEY ?? "minioadmin";
     this.llmModel = process.env.LLM_MODEL ?? "";
     this.fluxModelId = process.env.FLUX_MODEL_ID ?? "";
+    this.qwenImageModelId = process.env.QWEN_IMAGE_MODEL_ID || "Qwen/Qwen-Image-2.1";
+    this.qwenPython = process.env.QWEN_PYTHON ?? "";
   }
 }

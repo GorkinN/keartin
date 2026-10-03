@@ -1,7 +1,9 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, Param, Post, Res, StreamableFile } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Header, HttpCode, Param, Post, Res, StreamableFile, UploadedFiles, UseInterceptors } from "@nestjs/common";
+import { FileFieldsInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
+import { memoryStorage } from "multer";
 import { GenerateService } from "../generate/generate.service";
-import { ImagesService } from "./images.service";
+import { ImagesService, type UploadImage } from "./images.service";
 
 @Controller("images")
 export class ImagesController {
@@ -12,8 +14,20 @@ export class ImagesController {
 
   @Post()
   @HttpCode(202)
-  async start(@Body() body: unknown) {
-    const item = await this.images.enqueue(body);
+  @UseInterceptors(
+    FileFieldsInterceptor(
+      [
+        { name: "references", maxCount: 10 },
+        { name: "mask", maxCount: 1 },
+      ],
+      { storage: memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 11 } },
+    ),
+  )
+  async start(
+    @Body() body: unknown,
+    @UploadedFiles() files?: { references?: UploadImage[]; mask?: UploadImage[] },
+  ) {
+    const item = await this.images.enqueue(body, files);
     this.generate.wake();
     return item;
   }

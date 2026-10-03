@@ -15,6 +15,9 @@ export type ImageBatchDto = {
   count: number;
   status: string;
   error: string | null;
+  model: string;
+  transparent: boolean;
+  gguf: string;
   images: ImageFileDto[];
   activeJobId: string | null;
   createdAt: string;
@@ -44,6 +47,9 @@ export function toImageBatchDto(batch: BatchRow): ImageBatchDto {
     count: batch.count,
     status: batch.status,
     error: batch.error,
+    model: batch.fluxModel,
+    transparent: batch.transparent,
+    gguf: batch.gguf,
     images: [...batch.images]
       .sort((a, b) => a.index - b.index)
       .map((image) => ({ index: image.index, seed: image.seed })),

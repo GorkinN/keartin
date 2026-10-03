@@ -20,6 +20,7 @@ import { PostFiles } from "../posts/post-files";
 import { nextStoragePrefix } from "../posts/slug";
 import { PrismaService } from "../prisma/prisma.service";
 import { ImagesService } from "../images/images.service";
+import { assertImageFit, imageModelOfRepo, parseImageModel, repoForImageModel } from "../images/limits";
 import { batchSeed, parseGenerateInput, type GenerateInput } from "./input";
 import { JobHub } from "./job-hub";
 
@@ -90,9 +91,26 @@ export class GenerateService implements OnApplicationBootstrap {
     if (!post.text.trim()) throw new BadRequestException("нет текста поста");
     await this.ensureIdle(postId);
     const imagePresetId = parseImagePresetUpdate(body);
+    const imageModel = parseOptionalImageModel(body);
+    const gguf = parseOptionalGguf(body);
+    const data: { imagePresetId?: string | null; fluxModel?: string; gguf?: string } = {};
     if (imagePresetId !== undefined) {
       if (imagePresetId) await this.requireImagePreset(imagePresetId);
-      await this.prisma.post.update({ where: { id: post.id }, data: { imagePresetId } });
+      data.imagePresetId = imagePresetId;
+    }
+    if (imageModel) {
+      assertImageFit(imageModel, post.width, post.height, post.steps);
+      data.fluxModel = repoForImageModel(imageModel, this.env.fluxModelId, this.env.qwenImageModelId);
+      if (imageModel === "flux") data.gguf = "";
+    }
+    if (gguf !== undefined) {
+      if ((imageModel ?? imageModelOfRepo(post.fluxModel, this.env.qwenImageModelId)) !== "qwen") {
+        throw new BadRequestException("выбор GGUF доступен только у Qwen-Image-2.1");
+      }
+      data.gguf = gguf;
+    }
+    if (Object.keys(data).length > 0) {
+      await this.prisma.post.update({ where: { id: post.id }, data });
     }
     await this.ensureAi();
     const queued = await this.enqueue(post.id, "image", parseImageSeed(body));
@@ -431,8 +449,8 @@ export class GenerateService implements OnApplicationBootstrap {
     await this.python.stream(
       streamPath(job.kind),
       job.kind === "image"
-        ? imageBody(job.post, jobId, imageStyle, this.imageSeeds.get(jobId))
-        : postBody(job.post, jobId, preset, imageStyle),
+        ? imageBody(job.post, jobId, imageStyle, this.env.qwenImageModelId, this.imageSeeds.get(jobId))
+        : postBody(job.post, jobId, preset, imageStyle, this.env.qwenImageModelId),
       async (event) => {
         if (finished) return;
         if (event.event === "cancelled") {
@@ -597,7 +615,8 @@ export class GenerateService implements OnApplicationBootstrap {
             storagePrefix: slot.storagePrefix,
             slug: slot.slug,
             llmModel: this.env.llmModel,
-            fluxModel: this.env.fluxModelId,
+            fluxModel: repoForImageModel(input.imageModel, this.env.fluxModelId, this.env.qwenImageModelId),
+            gguf: input.imageModel === "qwen" ? input.imageGguf : "",
             status: "draft",
           },
         });
@@ -706,6 +725,7 @@ function postBody(
   jobId: string,
   preset: StylePreset | null,
   imageStyle: string,
+  qwenModelId: string,
 ): Record<string, unknown> {
   const body: Record<string, unknown> = {
     topic: post.topic,
@@ -721,6 +741,8 @@ function postBody(
     height: post.height,
     steps: post.steps,
     job_id: jobId,
+    image_model: imageModelOfRepo(post.fluxModel, qwenModelId),
+    gguf: post.gguf,
   };
   if (post.temperature !== null) body.temperature = post.temperature;
   if (post.imageSeed !== null) body.seed = post.imageSeed;
@@ -733,13 +755,15 @@ function postBody(
   return withImageStyle(body, imageStyle);
 }
 
-function imageBody(post: Post, jobId: string, imageStyle: string, seed?: number): Record<string, unknown> {
+function imageBody(post: Post, jobId: string, imageStyle: string, qwenModelId: string, seed?: number): Record<string, unknown> {
   const body: Record<string, unknown> = {
     text: post.text,
     width: post.width,
     height: post.height,
     steps: post.steps,
     job_id: jobId,
+    image_model: imageModelOfRepo(post.fluxModel, qwenModelId),
+    gguf: post.gguf,
   };
   if (post.temperature !== null) body.temperature = post.temperature;
   if (seed !== undefined) body.seed = seed;
@@ -762,6 +786,21 @@ function parseImagePresetUpdate(body: unknown): string | null | undefined {
     throw new BadRequestException("imagePresetId должен быть строкой");
   }
   return value.trim();
+}
+
+function parseOptionalGguf(body: unknown): string | undefined {
+  if (!isRecord(body) || !Object.prototype.hasOwnProperty.call(body, "gguf")) return undefined;
+  if (typeof body.gguf !== "string") throw new BadRequestException("gguf должен быть именем файла");
+  const text = body.gguf.trim();
+  if (text.length > 200 || text.includes("/") || text.includes("\\") || text.includes("..")) {
+    throw new BadRequestException("gguf должен быть именем файла");
+  }
+  return text;
+}
+
+function parseOptionalImageModel(body: unknown): "flux" | "qwen" | undefined {
+  if (!isRecord(body) || !Object.prototype.hasOwnProperty.call(body, "imageModel")) return undefined;
+  return parseImageModel(body.imageModel, "flux");
 }
 
 function parseImageSeed(body: unknown): number | undefined {

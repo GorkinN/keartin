@@ -12,12 +12,17 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.bootstrap import repo_root
 from app.gpu.errors import GpuError
 from app.gpu.manager import GpuManager
 from app.image.flux_pipeline import FluxError, FluxPipelineHolder
+from app.image.limits import default_steps, validate_image_request
+from app.image.qwen_runner import QwenError
+from app.image.runtime import ImageRuntime
 from app.llm.ollama_client import OllamaClient, OllamaError
 from app.messages import CANCELLED, public_message
 from app.pipeline.cancel import CancelRegistry
@@ -60,10 +65,15 @@ class TextGenerateResponse(BaseModel):
 
 class ImageGenerateRequest(BaseModel):
     prompt: str = Field(min_length=1)
-    width: int | None = Field(default=None, ge=256, le=1024)
-    height: int | None = Field(default=None, ge=256, le=1024)
-    steps: int | None = Field(default=None, ge=20, le=28)
+    model: Literal["flux", "qwen"] = "flux"
+    width: int | None = None
+    height: int | None = None
+    steps: int | None = None
     seed: int | None = None
+    transparent: bool = False
+    reference_paths: list[str] = Field(default_factory=list)
+    mask_path: str | None = None
+    gguf: str = ""
 
     @field_validator("prompt")
     @classmethod
@@ -73,22 +83,30 @@ class ImageGenerateRequest(BaseModel):
             raise ValueError("prompt is required")
         return text
 
-    @field_validator("width", "height")
+    @field_validator("gguf")
     @classmethod
-    def multiple_of_16(cls, value: int | None) -> int | None:
-        if value is not None and value % 16 != 0:
-            raise ValueError("width and height must be multiples of 16")
-        return value
+    def strip_gguf(cls, value: str) -> str:
+        return _clean_gguf(value)
+
+    @model_validator(mode="after")
+    def check_model_limits(self) -> ImageGenerateRequest:
+        _check_image_fields(self.model, self.width, self.height, self.steps, self.reference_paths, self.mask_path, self.transparent, self.gguf)
+        return self
 
 
 class ImagesGenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=4000)
-    width: int | None = Field(default=None, ge=256, le=1024)
-    height: int | None = Field(default=None, ge=256, le=1024)
-    steps: int | None = Field(default=None, ge=20, le=28)
+    model: Literal["flux", "qwen"] = "flux"
+    width: int | None = None
+    height: int | None = None
+    steps: int | None = None
     seed: int | None = Field(default=None, ge=0, le=2_147_483_647)
     count: int = Field(default=1, ge=1, le=20)
     job_id: str
+    transparent: bool = False
+    reference_paths: list[str] = Field(default_factory=list)
+    mask_path: str | None = None
+    gguf: str = ""
 
     @field_validator("prompt")
     @classmethod
@@ -98,12 +116,10 @@ class ImagesGenerateRequest(BaseModel):
             raise ValueError("prompt is required")
         return text
 
-    @field_validator("width", "height")
+    @field_validator("gguf")
     @classmethod
-    def multiple_of_16(cls, value: int | None) -> int | None:
-        if value is not None and value % 16 != 0:
-            raise ValueError("width and height must be multiples of 16")
-        return value
+    def strip_batch_gguf(cls, value: str) -> str:
+        return _clean_gguf(value)
 
     @field_validator("job_id")
     @classmethod
@@ -111,6 +127,44 @@ class ImagesGenerateRequest(BaseModel):
         if not JOB_ID_RE.fullmatch(value) or ".." in value:
             raise ValueError("invalid job_id")
         return value
+
+    @model_validator(mode="after")
+    def check_model_limits(self) -> ImagesGenerateRequest:
+        _check_image_fields(self.model, self.width, self.height, self.steps, self.reference_paths, self.mask_path, self.transparent, self.gguf)
+        return self
+
+
+def _clean_gguf(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    if len(text) > 200 or "/" in text or "\\" in text or ".." in text:
+        raise ValueError("invalid gguf")
+    return text
+
+
+def _check_image_fields(
+    model: str,
+    width: int | None,
+    height: int | None,
+    steps: int | None,
+    reference_paths: list[str],
+    mask_path: str | None,
+    transparent: bool,
+    gguf: str = "",
+) -> None:
+    try:
+        validate_image_request(model, width, height, steps)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+    if model != "qwen" and (reference_paths or mask_path or transparent or gguf):
+        raise ValueError("references, mask, transparency and gguf require model qwen")
+    if len(reference_paths) > 10:
+        raise ValueError("at most 10 reference images")
+    if mask_path and not reference_paths:
+        raise ValueError("mask requires a reference image")
+    if len(reference_paths) + (1 if mask_path else 0) > 10:
+        raise ValueError("at most 10 condition images, including the mask")
 
 
 class ImageGenerateResponse(BaseModel):
@@ -144,6 +198,10 @@ def _flux(request: Request) -> FluxPipelineHolder:
     return request.app.state.flux
 
 
+def _images(request: Request) -> ImageRuntime:
+    return request.app.state.images
+
+
 def indexed_seed(seed: int, index: int, count: int) -> int:
     """Match Nest `batchSeed`: a single image keeps `seed`; later images add the index."""
     if count <= 1:
@@ -154,7 +212,7 @@ def indexed_seed(seed: int, index: int, count: int) -> int:
 def _image_params(body: ImageGenerateRequest) -> tuple[int, int, int, int]:
     width = body.width or DEFAULT_WIDTH
     height = body.height or DEFAULT_HEIGHT
-    steps = body.steps or DEFAULT_STEPS
+    steps = body.steps if body.steps is not None else default_steps(body.model)
     seed = body.seed if body.seed is not None else random.randint(0, 2**31 - 1)
     return width, height, steps, seed
 
@@ -251,6 +309,8 @@ async def generate_image(body: ImageGenerateRequest, request: Request) -> ImageG
     width, height, steps, seed = _image_params(body)
     await gpu.acquire("flux")
     try:
+        if body.model == "qwen":
+            return await _qwen_image_response(request, body, width, height, steps, seed)
         image = await asyncio.to_thread(
             flux.generate,
             prompt=body.prompt,
@@ -270,7 +330,7 @@ async def generate_image(body: ImageGenerateRequest, request: Request) -> ImageG
             image_base64=encoded,
         )
     except (GpuError, FluxError) as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=public_message(exc)) from exc
     finally:
         await gpu.release()
 
@@ -280,6 +340,10 @@ async def generate_image_stream(
     body: ImageGenerateRequest,
     request: Request,
 ) -> AsyncIterator[ServerSentEvent]:
+    if body.model == "qwen":
+        async for event in _iter_qwen_single(body, request):
+            yield event
+        return
     flux = _flux(request)
     gpu = _gpu(request)
     width, height, steps, seed = _image_params(body)
@@ -371,6 +435,81 @@ async def _stream_flux_generate(
             raise first  # type: ignore[misc]
 
 
+async def _qwen_image_response(
+    request: Request,
+    body: ImageGenerateRequest,
+    width: int,
+    height: int,
+    steps: int,
+    seed: int,
+) -> ImageGenerateResponse:
+    images = _images(request)
+    await asyncio.to_thread(images.flux.unload)
+    out_dir = repo_root() / "data" / "tmp"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = out_dir / f"qwen-{stamp}-{seed}.png"
+    cancel = out_dir / f"qwen-{stamp}-{seed}.cancel"
+    try:
+        await asyncio.to_thread(
+            images.qwen.run,
+            prompt=body.prompt,
+            width=width,
+            height=height,
+            steps=steps,
+            items=[{"index": 0, "seed": seed, "path": str(path)}],
+            image_paths=body.reference_paths,
+            mask_path=body.mask_path,
+            transparent=body.transparent,
+            gguf=body.gguf,
+            cancel_path=cancel,
+        )
+    except QwenError as exc:
+        raise
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return ImageGenerateResponse(
+        path=str(path),
+        seed=seed,
+        width=width,
+        height=height,
+        steps=steps,
+        model=get_settings().qwen_image_model_id,
+        image_base64=encoded,
+    )
+
+
+async def _iter_qwen_single(
+    body: ImageGenerateRequest,
+    request: Request,
+) -> AsyncIterator[ServerSentEvent]:
+    images = _images(request)
+    gpu = _gpu(request)
+    width, height, steps, seed = _image_params(body)
+    yield ServerSentEvent(data={"phase": "unload_llm"}, event="status")
+    try:
+        await gpu.acquire("flux")
+    except GpuError as exc:
+        yield ServerSentEvent(data={"message": public_message(exc)}, event="error")
+        return
+    try:
+        yield ServerSentEvent(data={"phase": "load_flux"}, event="status")
+        await asyncio.to_thread(images.flux.unload)
+        response = await _qwen_image_response(request, body, width, height, steps, seed)
+        yield ServerSentEvent(data={"phase": "generate"}, event="status")
+        yield ServerSentEvent(data=response.model_dump(), event="done")
+        yield ServerSentEvent(data={"phase": "unload_flux"}, event="status")
+    except (GpuError, FluxError) as exc:
+        yield ServerSentEvent(data={"message": public_message(exc)}, event="error")
+    except Exception as exc:
+        logger.exception("qwen image stream failed")
+        yield ServerSentEvent(data={"message": public_message(exc)}, event="error")
+    finally:
+        try:
+            await gpu.release()
+        except Exception as exc:
+            logger.warning("gpu release after qwen image failed: %s", exc)
+
+
 def _cancels(request: Request) -> CancelRegistry:
     return request.app.state.cancels
 
@@ -388,28 +527,142 @@ async def generate_images_stream(
     body: ImagesGenerateRequest,
     request: Request,
 ) -> AsyncIterator[ServerSentEvent]:
-    flux = _flux(request)
+    images = _images(request)
     gpu = _gpu(request)
     width = body.width or DEFAULT_WIDTH
     height = body.height or DEFAULT_HEIGHT
-    steps = body.steps or BATCH_STEPS
+    steps = body.steps if body.steps is not None else default_steps(body.model, batch=True)
     stop = _cancels(request).open(body.job_id)
     try:
-        async for event in _iter_image_batch(
-            flux,
-            gpu,
-            prompt=body.prompt,
-            width=width,
-            height=height,
-            steps=steps,
-            seed=body.seed,
-            count=body.count,
-            job_id=body.job_id,
-            stop=stop,
-        ):
-            yield event
+        if body.model == "qwen":
+            async for event in _iter_qwen_batch(
+                images,
+                gpu,
+                prompt=body.prompt,
+                width=width,
+                height=height,
+                steps=steps,
+                seed=body.seed,
+                count=body.count,
+                job_id=body.job_id,
+                stop=stop,
+                reference_paths=body.reference_paths,
+                mask_path=body.mask_path,
+                transparent=body.transparent,
+                gguf=body.gguf,
+            ):
+                yield event
+        else:
+            async for event in _iter_image_batch(
+                images.flux,
+                gpu,
+                prompt=body.prompt,
+                width=width,
+                height=height,
+                steps=steps,
+                seed=body.seed,
+                count=body.count,
+                job_id=body.job_id,
+                stop=stop,
+            ):
+                yield event
     finally:
         _cancels(request).close(body.job_id)
+
+
+async def _iter_qwen_batch(
+    images: ImageRuntime,
+    gpu: GpuManager,
+    *,
+    prompt: str,
+    width: int,
+    height: int,
+    steps: int,
+    seed: int | None,
+    count: int,
+    job_id: str,
+    stop: threading.Event,
+    reference_paths: list[str],
+    mask_path: str | None,
+    transparent: bool,
+    gguf: str = "",
+) -> AsyncIterator[ServerSentEvent]:
+    yield ServerSentEvent(data={"phase": "unload_llm"}, event="status")
+    try:
+        await gpu.acquire("flux")
+    except GpuError as exc:
+        yield ServerSentEvent(data={"message": public_message(exc)}, event="error")
+        return
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue[tuple[str, object]] = asyncio.Queue()
+    out_dir = repo_root() / "data" / "tmp" / "images" / job_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    items: list[dict[str, object]] = []
+    for index in range(count):
+        image_seed = random.randint(0, 2**31 - 1) if seed is None else indexed_seed(seed, index, count)
+        items.append({"index": index, "seed": image_seed, "path": str(out_dir / f"{index}.png")})
+
+    def on_progress(index: int, step: int, total: int) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, ("progress", {"index": index, "step": step, "total": total}))
+
+    def on_image(index: int, image_seed: int, path: str) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, ("image", {"index": index, "seed": image_seed, "path": path}))
+
+    def work() -> None:
+        try:
+            images.flux.unload()
+            status = images.qwen.run(
+                prompt=prompt,
+                width=width,
+                height=height,
+                steps=steps,
+                items=items,
+                image_paths=reference_paths,
+                mask_path=mask_path,
+                transparent=transparent,
+                gguf=gguf,
+                cancel_path=out_dir / "cancel",
+                on_progress=on_progress,
+                on_image=on_image,
+                stop=stop,
+            )
+            loop.call_soon_threadsafe(queue.put_nowait, ("finished", status))
+        except Exception as exc:
+            loop.call_soon_threadsafe(queue.put_nowait, ("error", exc))
+
+    try:
+        yield ServerSentEvent(data={"phase": "load_flux"}, event="status")
+        future = loop.run_in_executor(None, work)
+        while True:
+            kind, payload = await queue.get()
+            if kind == "progress":
+                yield ServerSentEvent(data=payload, event="image_progress")
+            elif kind == "image":
+                yield ServerSentEvent(data=payload, event="image_done")
+            elif kind == "finished":
+                await future
+                if payload == "cancelled" or stop.is_set():
+                    yield ServerSentEvent(data={"message": CANCELLED}, event="cancelled")
+                    return
+                yield ServerSentEvent(data={"phase": "unload_flux"}, event="status")
+                yield ServerSentEvent(data={"count": count}, event="done")
+                return
+            else:
+                exc = payload if isinstance(payload, BaseException) else QwenError("qwen worker failed")
+                yield ServerSentEvent(data={"message": public_message(exc)}, event="error")
+                try:
+                    await future
+                except Exception:
+                    logger.exception("qwen batch failed job=%s", job_id)
+                return
+    except Exception as exc:
+        logger.exception("qwen batch failed job=%s", job_id)
+        yield ServerSentEvent(data={"message": public_message(exc)}, event="error")
+    finally:
+        try:
+            await gpu.release()
+        except Exception as exc:
+            logger.warning("gpu release after qwen batch failed: %s", exc)
 
 
 async def _iter_image_batch(

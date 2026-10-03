@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/layout";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { ConfigPage } from "@/pages/config";
 import { CreatePage } from "@/pages/create";
 import { HistoryDetailRoute, HistoryPage } from "@/pages/history";
 import { ImagesPage } from "@/pages/images";
@@ -19,6 +20,7 @@ export function App() {
             <Route path="/history" element={<HistoryPage />} />
             <Route path="/history/:id" element={<HistoryDetailRoute />} />
             <Route path="/presets" element={<PresetsPage />} />
+            <Route path="/config" element={<ConfigPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

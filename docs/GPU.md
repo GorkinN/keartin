@@ -36,6 +36,14 @@
 
 Дефолт API: 1024×1024, 28 steps, `guidance_scale=3.5`, seed в ответе. PNG в `data/tmp/` + `image_base64`.
 
+## Qwen-Image-2.1
+
+Отдельный интерпретатор `ai-service/.venv-qwen` (`scripts/setup-qwen-venv.ps1`). FastAPI его не импортирует: под тенантом `flux` запускается `python -m app.image.qwen_worker`. Веса `Qwen/Qwen-Image-2.1` качаются в `HF_HOME` скриптом `scripts/download-qwen-image.ps1`, `local_files_only=True`.
+
+Если BF16 не влезает в 12 ГБ, воркер включает `enable_model_cpu_offload()`. Если во время шага не хватает памяти на весь transformer, тот же процесс перезагружает пайплайн через `enable_sequential_cpu_offload()`. Полный `.to("cuda")` не вызывается. После выхода процесса родитель снова ждёт свободную VRAM.
+
+`QWEN_MODEL_PATH` — первый GGUF только для transformer (как `FLUX_MODEL_PATH`). `QWEN_MODEL_PATHS` — дополнительные файлы через `;`. Форма показывает их по имени файла и не принимает произвольный путь. Текстовый энкодер и VAE всё равно берутся из `Qwen/Qwen-Image-2.1` в `HF_HOME`. Если задан хотя бы один GGUF, `scripts/download-qwen-image.ps1` не качает веса transformer.
+
 ## Torch CUDA
 
 Колесо не с PyPI (там CPU). В venv:

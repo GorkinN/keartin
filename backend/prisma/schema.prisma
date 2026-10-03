@@ -83,6 +83,7 @@ model Post {
   slug          String
   llmModel      String         @default("")
   fluxModel     String         @default("")
+  gguf          String         @default("")
   sources       String         @default("[]")
   status        String         @default("draft")
   createdAt     DateTime       @default(now())
@@ -114,6 +115,10 @@ model ImageBatch {
   status    String           @default("queued")
   error     String?
   fluxModel String           @default("")
+  transparent Boolean        @default(false)
+  referenceKeys String       @default("[]")
+  maskKey   String           @default("")
+  gguf      String           @default("")
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
   images    GeneratedImage[]
