@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
 import { imageModelLabel, QWEN_SIZE_PRESETS, sideMax, stepBounds, type ImageModelId } from "@/api/image-model";
@@ -436,9 +437,14 @@ export function ImagesPage() {
                   {batch.seed !== null ? ` · seed ${batch.seed}` : ""}
                 </p>
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => { setDeleteError(null); setDeleteId(batch.id); }}>
-                Удалить
-              </Button>
+              <div className="flex shrink-0 gap-2">
+                <Button type="button" variant="ghost" size="sm" asChild>
+                  <Link to={`/history/images/${batch.id}`}>В истории</Link>
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={() => { setDeleteError(null); setDeleteId(batch.id); }}>
+                  Удалить
+                </Button>
+              </div>
             </div>
             {batch.error ? <ErrorText message={batch.error} /> : null}
             {batch.images.length > 0 ? (

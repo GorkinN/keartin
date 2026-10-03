@@ -11,6 +11,8 @@ OCR_MISSING = "Модель распознавания сканов не ска�
 QWEN_MISSING = "Модель Qwen-Image-2.1 не скачана. Запустите scripts/download-qwen-image.ps1."
 QWEN_GGUF_BASE_MISSING = "GGUF — это только transformer. Текстовый энкодер и VAE всё ещё нужны в кэше Hugging Face. Запустите scripts/download-qwen-image.ps1."
 QWEN_PYTHON_MISSING = "Окружение Qwen не найдено. Запустите scripts/setup-qwen-venv.ps1."
+QWEN_TORCHVISION_MISSING = "В окружении Qwen нет torchvision. Запустите scripts/setup-qwen-venv.ps1."
+QWEN_VENV_WRONG = "Генерация Qwen запустилась не в своём окружении и была остановлена."
 QWEN_GGUF_UNKNOWN = "Такого файла GGUF нет в настройках. Проверьте QWEN_MODEL_PATH и QWEN_MODEL_PATHS."
 OCR_NO_CUDA = "Для распознавания скана нужна видеокарта CUDA."
 BAD_FORMAT = "Формат файла не поддерживается."
@@ -47,6 +49,10 @@ def public_message(exc: BaseException) -> str:
         return QWEN_MISSING
     if lowered.startswith("qwen python"):
         return QWEN_PYTHON_MISSING
+    if lowered.startswith("qwen torchvision") or "requires the torchvision library" in lowered:
+        return QWEN_TORCHVISION_MISSING
+    if lowered.startswith("qwen venv"):
+        return QWEN_VENV_WRONG
     if lowered.startswith("qwen gguf"):
         return QWEN_GGUF_UNKNOWN
     if lowered.startswith("cuda is unavailable for ocr"):

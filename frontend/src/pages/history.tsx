@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
 import { gpuBusyLabel } from "@/api/seed";
@@ -11,7 +11,9 @@ import { PostPreview } from "@/components/post-preview";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useGeneration } from "@/hooks/useGeneration";
+import { ImageHistoryList } from "@/pages/history-images";
 
 const PREVIEW_WORDS = 8;
 const historyColumns = "grid grid-cols-[minmax(11rem,0.85fr)_minmax(0,1.4fr)]";
@@ -52,6 +54,8 @@ function groupPosts(posts: Post[]): PostGroup[] {
 }
 
 export function HistoryPage() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab") === "images" ? "images" : "posts";
   const [titleQuery, setTitleQuery] = useState("");
   const posts = useQuery({
     queryKey: ["posts"],
@@ -67,6 +71,45 @@ export function HistoryPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">История</h1>
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          setParams(value === "images" ? { tab: "images" } : {}, { replace: true });
+        }}
+      >
+        <TabsList>
+          <TabsTrigger value="posts">Посты</TabsTrigger>
+          <TabsTrigger value="images">Картинки</TabsTrigger>
+        </TabsList>
+        <TabsContent value="posts">
+          <PostHistory
+            titleQuery={titleQuery}
+            onTitleQuery={setTitleQuery}
+            posts={posts}
+            groups={groups}
+          />
+        </TabsContent>
+        <TabsContent value="images">
+          <ImageHistoryList />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+function PostHistory({
+  titleQuery,
+  onTitleQuery,
+  posts,
+  groups,
+}: {
+  titleQuery: string;
+  onTitleQuery: (value: string) => void;
+  posts: ReturnType<typeof useQuery<Post[]>>;
+  groups: PostGroup[];
+}) {
+  return (
+    <div className="space-y-4">
       <ErrorText message={posts.isError ? errorMessage(posts.error) : null} />
       {posts.isPending ? <p className="text-sm text-muted-foreground">Загрузка…</p> : null}
       {posts.data && posts.data.length === 0 ? (
@@ -78,7 +121,7 @@ export function HistoryPage() {
         <div className="space-y-4">
           <Input
             value={titleQuery}
-            onChange={(event) => setTitleQuery(event.target.value)}
+            onChange={(event) => onTitleQuery(event.target.value)}
             placeholder="Фильтр по названию"
             aria-label="Фильтр по названию"
           />

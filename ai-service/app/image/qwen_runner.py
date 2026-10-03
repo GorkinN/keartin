@@ -32,6 +32,39 @@ def qwen_python_ready(settings: Settings) -> bool:
     return qwen_python_path(settings).is_file()
 
 
+def qwen_subprocess_env(python: Path, settings: Settings) -> dict[str, str]:
+    """Environment of one Qwen generation. It activates `.venv-qwen` and hides the API venv."""
+    resolved = python.resolve()
+    venv = resolved.parent.parent
+    scripts = resolved.parent
+    env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    env["VIRTUAL_ENV"] = str(venv)
+    env["QWEN_VENV"] = str(venv)
+    env["__PYVENV_LAUNCHER__"] = str(resolved)
+    env["PYTHONNOUSERSITE"] = "1"
+    env["PYTHONPATH"] = str(repo_root() / "ai-service")
+    main_scripts = (repo_root() / "ai-service" / ".venv" / "Scripts").resolve()
+    parts = [str(scripts)]
+    for part in env.get("PATH", "").split(os.pathsep):
+        if not part:
+            continue
+        try:
+            current = Path(part).resolve()
+        except OSError:
+            parts.append(part)
+            continue
+        if current == main_scripts or current == scripts:
+            continue
+        parts.append(part)
+    env["PATH"] = os.pathsep.join(parts)
+    for key in ("HF_HOME", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE"):
+        value = getattr(settings, key.lower(), "") or env.get(key, "")
+        if value:
+            env[key] = value
+    return env
+
+
 def qwen_gguf_entries(settings: Settings) -> list[tuple[str, Path]]:
     """Configured transformer files. The id is the file name, never a client path."""
     raw: list[str] = []
@@ -139,14 +172,10 @@ class QwenRunner:
         cancel_path.write_text("", encoding="utf-8")
         watcher = _CancelWatcher(stop, cancel_path)
         watcher.start()
-        env = os.environ.copy()
-        for key in ("HF_HOME", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE"):
-            value = getattr(self._settings, key.lower(), "") or env.get(key, "")
-            if value:
-                env[key] = value
-        env["PYTHONPATH"] = str(repo_root() / "ai-service")
+        env = qwen_subprocess_env(python, self._settings)
         self.running = True
         stderr_tail: list[str] = []
+        process: subprocess.Popen[bytes] | None = None
         try:
             process = subprocess.Popen(
                 [str(python), "-m", "app.image.qwen_worker"],
@@ -193,6 +222,7 @@ class QwenRunner:
             return status
         finally:
             watcher.stop()
+            _stop_process(process)
             self.running = False
 
 
@@ -241,6 +271,19 @@ class _CancelWatcher:
                 self._path.write_text("1", encoding="utf-8")
                 return
             self._done.wait(0.2)
+
+
+def _stop_process(process: subprocess.Popen[bytes] | None) -> None:
+    """The Qwen venv lives only inside this process. After the picture it has to exit."""
+    if process is None:
+        return
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
 
 
 def _collect_stderr(pipe: Any, tail: list[str]) -> None:

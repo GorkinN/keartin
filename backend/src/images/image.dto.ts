@@ -18,6 +18,7 @@ export type ImageBatchDto = {
   model: string;
   transparent: boolean;
   gguf: string;
+  storagePrefix: string;
   images: ImageFileDto[];
   activeJobId: string | null;
   createdAt: string;
@@ -50,6 +51,7 @@ export function toImageBatchDto(batch: BatchRow): ImageBatchDto {
     model: batch.fluxModel,
     transparent: batch.transparent,
     gguf: batch.gguf,
+    storagePrefix: batch.storagePrefix ?? "",
     images: [...batch.images]
       .sort((a, b) => a.index - b.index)
       .map((image) => ({ index: image.index, seed: image.seed })),
@@ -57,4 +59,29 @@ export function toImageBatchDto(batch: BatchRow): ImageBatchDto {
     createdAt: batch.createdAt.toISOString(),
     updatedAt: batch.updatedAt.toISOString(),
   };
+}
+
+export function imageMeta(batch: BatchRow): string {
+  const dto = toImageBatchDto(batch);
+  return `${JSON.stringify(
+    {
+      id: dto.id,
+      prompt: dto.prompt,
+      width: dto.width,
+      height: dto.height,
+      steps: dto.steps,
+      seed: dto.seed,
+      count: dto.count,
+      status: dto.status,
+      model: dto.model,
+      transparent: dto.transparent,
+      gguf: dto.gguf,
+      storagePrefix: dto.storagePrefix,
+      images: dto.images,
+      createdAt: dto.createdAt,
+      updatedAt: dto.updatedAt,
+    },
+    null,
+    2,
+  )}\n`;
 }

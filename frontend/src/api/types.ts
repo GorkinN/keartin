@@ -142,6 +142,7 @@ export type ImageBatch = {
   model: string;
   transparent: boolean;
   gguf?: string;
+  storagePrefix?: string;
   images: ImageFile[];
   activeJobId: string | null;
   createdAt: string;

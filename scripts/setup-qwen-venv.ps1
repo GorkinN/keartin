@@ -20,8 +20,8 @@ Write-Host "Installing the qwen extra (diffusers with QwenImage21Pipeline, trans
 & $VenvPython -m pip install -e ".\ai-service[qwen]" --extra-index-url https://download.pytorch.org/whl/cu126
 if ($LASTEXITCODE -ne 0) { throw "qwen extra install failed" }
 
-Write-Host "Restoring the CUDA torch wheel in case the extra replaced it..."
-& $VenvPython -m pip install torch==2.13.0 --index-url https://download.pytorch.org/whl/cu126
+Write-Host "Restoring the CUDA torch wheel and torchvision (Qwen3-VL needs it)..."
+& $VenvPython -m pip install torch==2.13.0 torchvision==0.28.0 --index-url https://download.pytorch.org/whl/cu126
 if ($LASTEXITCODE -ne 0) { throw "torch reinstall failed" }
 
 Write-Host "Done. QWEN_PYTHON=$VenvPython"

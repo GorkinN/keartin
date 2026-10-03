@@ -38,7 +38,7 @@
 
 ## Qwen-Image-2.1
 
-Отдельный интерпретатор `ai-service/.venv-qwen` (`scripts/setup-qwen-venv.ps1`). FastAPI его не импортирует: под тенантом `flux` запускается `python -m app.image.qwen_worker`. Веса `Qwen/Qwen-Image-2.1` качаются в `HF_HOME` скриптом `scripts/download-qwen-image.ps1`, `local_files_only=True`.
+Отдельный интерпретатор `ai-service/.venv-qwen` (`scripts/setup-qwen-venv.ps1`, torch и torchvision с индекса cu126). FastAPI его не импортирует: на время генерации под тенантом `flux` запускается процесс `python -m app.image.qwen_worker` в этом окружении, после картинки процесс завершается и видеопамять освобождается. Веса `Qwen/Qwen-Image-2.1` качаются в `HF_HOME` скриптом `scripts/download-qwen-image.ps1`, `local_files_only=True`.
 
 Если BF16 не влезает в 12 ГБ, воркер включает `enable_model_cpu_offload()`. Если во время шага не хватает памяти на весь transformer, тот же процесс перезагружает пайплайн через `enable_sequential_cpu_offload()`. Полный `.to("cuda")` не вызывается. После выхода процесса родитель снова ждёт свободную VRAM.
 

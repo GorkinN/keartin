@@ -19,13 +19,17 @@ def main() -> None:
     load_runtime_env()
     try:
         job = json.loads(sys.stdin.read() or "{}")
+        _assert_this_venv()
         _run(job)
     except Exception as exc:
         _emit({"event": "error", "message": str(exc)})
         raise SystemExit(1) from exc
+    finally:
+        _release_cuda()
 
 
 def _run(job: dict[str, Any]) -> None:
+    _require_torchvision()
     import torch
     from PIL import Image
 
@@ -165,6 +169,34 @@ def _generate(
     kwargs["callback_on_step_end_tensor_inputs"] = ["latents"]
     result = pipe(**kwargs)
     return result.images[0]
+
+
+def _assert_this_venv() -> None:
+    import os
+
+    expected = os.environ.get("QWEN_VENV", "").strip()
+    if not expected:
+        return
+    if Path(sys.prefix).resolve() != Path(expected).resolve():
+        raise RuntimeError(f"qwen venv was not activated: {sys.prefix}")
+
+
+def _require_torchvision() -> None:
+    try:
+        import torchvision  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError("qwen torchvision is missing. Run scripts/setup-qwen-venv.ps1.") from exc
+
+
+def _release_cuda() -> None:
+    try:
+        import torch
+    except ImportError:
+        return
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.ipc_collect()
 
 
 def _assert_cached(model_id: str, *, gguf: bool = False) -> None:

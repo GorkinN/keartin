@@ -34,7 +34,7 @@ const MAP: Record<string, string> = {
   я: "ya",
 };
 
-export function slugifyTopic(topic: string): string {
+export function slugifyTopic(topic: string, fallback = "post"): string {
   let out = "";
   for (const ch of topic.trim().toLowerCase()) {
     if (MAP[ch] !== undefined) out += MAP[ch];
@@ -42,8 +42,8 @@ export function slugifyTopic(topic: string): string {
     else out += "-";
   }
   out = out.replace(/-+/g, "-").replace(/^-|-$/g, "");
-  if (!out) return "post";
-  return out.slice(0, 40).replace(/-$/g, "") || "post";
+  if (!out) return fallback;
+  return out.slice(0, 40).replace(/-$/g, "") || fallback;
 }
 
 export function localDateStamp(date = new Date()): string {
@@ -57,12 +57,13 @@ export async function nextStoragePrefix(
   topic: string,
   exists: (storagePrefix: string) => Promise<boolean>,
   date = new Date(),
+  root: "posts" | "images" = "posts",
 ): Promise<{ slug: string; storagePrefix: string }> {
   const stamp = localDateStamp(date);
-  const base = slugifyTopic(topic);
+  const base = slugifyTopic(topic, root === "images" ? "image" : "post");
   for (let n = 1; n < 1000; n += 1) {
     const slug = n === 1 ? base : `${base}-${n}`;
-    const storagePrefix = `posts/${stamp}_${slug}`;
+    const storagePrefix = `${root}/${stamp}_${slug}`;
     if (!(await exists(storagePrefix))) return { slug, storagePrefix };
   }
   throw new Error("не удалось подобрать имя папки");

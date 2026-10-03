@@ -70,6 +70,12 @@ export class ImagesController {
     return new StreamableFile(bytes, { type: "image/png", disposition: "inline" });
   }
 
+  @Post(":id/open-folder")
+  @HttpCode(200)
+  openFolder(@Param("id") id: string) {
+    return this.images.openFolder(id);
+  }
+
   @Get(":id")
   get(@Param("id") id: string) {
     return this.images.get(id);

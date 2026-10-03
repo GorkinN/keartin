@@ -57,6 +57,8 @@ async function checkPrefixes(): Promise<void> {
   taken.add(first.storagePrefix);
   const second = await nextStoragePrefix("цена и спрос", async (prefix) => taken.has(prefix), when);
   assert.equal(second.slug, "tsena-i-spros-2");
+  const imageSlot = await nextStoragePrefix("red fox", async () => false, when, "images");
+  assert.equal(imageSlot.storagePrefix, "images/2026-09-22_red-fox");
 }
 
 const split = consumeSse('event: token\ndata: {"text":"а"}\n\nevent: status\ndata: {"pha');

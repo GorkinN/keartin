@@ -7,7 +7,8 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { resolve, sep } from "node:path";
 import type { Response } from "express";
 import { PythonClient, PythonRequestError } from "../ai/python.client";
@@ -17,8 +18,10 @@ import { AppEnv } from "../config/env";
 import { JobHub } from "../generate/job-hub";
 import { PrismaService } from "../prisma/prisma.service";
 import { StorageProvider } from "../storage/storage.provider";
-import { toImageBatchDto, type ImageBatchDto, type ImageQueueItem } from "./image.dto";
-import { parseImageBatchInput } from "./input";
+import { asFileText } from "../common/json";
+import { nextStoragePrefix } from "../posts/slug";
+import { imageMeta, toImageBatchDto, type ImageBatchDto, type ImageQueueItem } from "./image.dto";
+import { parseImageBatchInput, type ImageBatchInput } from "./input";
 import { imageModelOfRepo, repoForImageModel } from "./limits";
 
 const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
@@ -63,30 +66,18 @@ export class ImagesService {
     if (!(await this.python.reachable())) {
       throw new BadGatewayException("AI-сервис недоступен");
     }
-    const jobId = randomUUID();
-    const batch = await this.prisma.imageBatch.create({
-      data: {
-        prompt: input.prompt,
-        width: input.width,
-        height: input.height,
-        steps: input.steps,
-        seed: input.seed,
-        count: input.count,
-        status: "queued",
-        transparent: input.transparent,
-        gguf: input.model === "qwen" ? input.gguf : "",
-        fluxModel: repoForImageModel(input.model, this.env.fluxModelId, this.env.qwenImageModelId),
-        job: { create: { id: jobId, status: "queued" } },
-      },
-    });
+    const batch = await this.createBatch(input);
+    const jobId = batch.job?.id;
+    if (!jobId || !batch.storagePrefix) throw new ConflictException("не удалось подобрать имя папки");
     try {
+      await this.storage.putText(`${batch.storagePrefix}/prompt.txt`, asFileText(batch.prompt));
       const referenceKeys: string[] = [];
       for (let index = 0; index < references.length; index += 1) {
-        const key = `images/${batch.id}/ref-${index}.png`;
+        const key = `${batch.storagePrefix}/ref-${index}.png`;
         await this.storage.putBytes(key, references[index].buffer);
         referenceKeys.push(key);
       }
-      const maskKey = mask ? `images/${batch.id}/mask.png` : "";
+      const maskKey = mask ? `${batch.storagePrefix}/mask.png` : "";
       if (mask) await this.storage.putBytes(maskKey, mask.buffer);
       if (referenceKeys.length > 0 || maskKey) {
         await this.prisma.imageBatch.update({
@@ -95,6 +86,7 @@ export class ImagesService {
         });
       }
     } catch (error) {
+      if (batch.storagePrefix) await this.storage.deletePrefix(batch.storagePrefix).catch(() => undefined);
       await this.prisma.imageBatch.delete({ where: { id: batch.id } }).catch(() => undefined);
       throw error;
     }
@@ -119,6 +111,34 @@ export class ImagesService {
     return toImageBatchDto(row);
   }
 
+  async openFolder(id: string): Promise<{ ok: true; path: string }> {
+    if (this.storage.driver !== "fs") {
+      throw new BadRequestException("открытие папки доступно только для локального хранилища");
+    }
+    if (process.platform !== "win32") {
+      throw new BadRequestException("открытие папки поддерживается только в Windows");
+    }
+    const batch = await this.prisma.imageBatch.findUnique({ where: { id } });
+    if (!batch) throw new NotFoundException("пачка не найдена");
+    const prefix = batch.storagePrefix || `images/${batch.id}`;
+    const dir = this.storage.absoluteDir(prefix);
+    if (!dir) {
+      throw new BadRequestException("открытие папки доступно только для локального хранилища");
+    }
+    try {
+      await access(dir);
+    } catch {
+      throw new NotFoundException("папка картинок не найдена");
+    }
+    const child = spawn("explorer.exe", [dir], {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+    return { ok: true, path: dir };
+  }
+
   async listQueue(): Promise<ImageQueueItem[]> {
     const jobs = await this.prisma.imageJob.findMany({
       where: { status: { in: ["queued", "running"] } },
@@ -140,6 +160,8 @@ export class ImagesService {
     if (job.status !== "queued") throw new ConflictException("задание уже выполняется");
     this.hub.publish(jobId, { event: "cancelled", data: { message: "убрано из очереди" } });
     this.hub.close(jobId);
+    const batch = await this.prisma.imageBatch.findUnique({ where: { id: job.batchId } });
+    if (batch?.storagePrefix) await this.storage.deletePrefix(batch.storagePrefix);
     await this.prisma.imageBatch.delete({ where: { id: job.batchId } });
     return { ok: true };
   }
@@ -153,7 +175,7 @@ export class ImagesService {
     if (batch.job && (batch.job.status === "queued" || batch.job.status === "running")) {
       throw new ConflictException("нельзя удалить пачку, пока она в очереди или генерируется");
     }
-    await this.storage.deletePrefix(`images/${batch.id}`);
+    await this.storage.deletePrefix(batch.storagePrefix || `images/${batch.id}`);
     await this.prisma.imageBatch.delete({ where: { id: batch.id } });
     return { ok: true };
   }
@@ -305,7 +327,7 @@ export class ImagesService {
           try {
             const index = indexOf(event.data, job.batch.count);
             const seed = seedOf(event.data);
-            await this.persistImage(job.batch.id, jobId, index, seed);
+            await this.persistImage(job.batch, jobId, index, seed);
             this.hub.publish(jobId, { event: "image_done", data: { index, seed } });
           } catch (error) {
             const message = error instanceof Error ? error.message : STORAGE_WRITE_ERROR;
@@ -329,6 +351,10 @@ export class ImagesService {
           await this.prisma.imageBatch.update({
             where: { id: job.batchId },
             data: { status: "ready", error: null },
+          });
+          await this.writeArchive(job.batchId).catch((error: unknown) => {
+            const message = error instanceof Error ? error.message : STORAGE_WRITE_ERROR;
+            this.logger.error(`job ${jobId}: ${message}`);
           });
           this.hub.publish(jobId, { event: "done", data: { count: saved } });
           return;
@@ -355,6 +381,7 @@ export class ImagesService {
       data: { status: "failed", error: message },
     });
     this.hub.publish(jobId, { event: "error", data: { message } });
+    await this.writeArchive(job.batchId).catch(() => undefined);
   }
 
   private async cancelOnce(jobId: string, message: string): Promise<void> {
@@ -372,13 +399,72 @@ export class ImagesService {
     this.hub.publish(jobId, { event: "cancelled", data: { message: text } });
   }
 
-  private async persistImage(batchId: string, jobId: string, index: number, seed: number): Promise<void> {
+  private async createBatch(input: ImageBatchInput) {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      let slot: { storagePrefix: string };
+      try {
+        slot = await nextStoragePrefix(
+          input.prompt,
+          async (storagePrefix) => {
+            const existing = await this.prisma.imageBatch.findUnique({ where: { storagePrefix } });
+            return existing !== null;
+          },
+          new Date(),
+          "images",
+        );
+      } catch {
+        throw new ConflictException("не удалось подобрать имя папки");
+      }
+      const jobId = randomUUID();
+      try {
+        return await this.prisma.imageBatch.create({
+          data: {
+            prompt: input.prompt,
+            width: input.width,
+            height: input.height,
+            steps: input.steps,
+            seed: input.seed,
+            count: input.count,
+            status: "queued",
+            transparent: input.transparent,
+            gguf: input.model === "qwen" ? input.gguf : "",
+            storagePrefix: slot.storagePrefix,
+            fluxModel: repoForImageModel(input.model, this.env.fluxModelId, this.env.qwenImageModelId),
+            job: { create: { id: jobId, status: "queued" } },
+          },
+          include: { job: true },
+        });
+      } catch (error) {
+        if (isUnique(error) && attempt < 4) continue;
+        throw error;
+      }
+    }
+    throw new ConflictException("не удалось подобрать имя папки");
+  }
+
+  private async writeArchive(batchId: string): Promise<void> {
+    const batch = await this.prisma.imageBatch.findUnique({
+      where: { id: batchId },
+      include: { images: { orderBy: { index: "asc" } }, job: true },
+    });
+    if (!batch?.storagePrefix) return;
+    await this.storage.putText(`${batch.storagePrefix}/prompt.txt`, asFileText(batch.prompt));
+    await this.storage.putText(`${batch.storagePrefix}/meta.json`, imageMeta(batch));
+  }
+
+  private async persistImage(
+    batch: { id: string; storagePrefix: string | null },
+    jobId: string,
+    index: number,
+    seed: number,
+  ): Promise<void> {
     const png = await this.readPng(jobId, index);
-    const storageKey = `images/${batchId}/${index}.png`;
+    const prefix = batch.storagePrefix || `images/${batch.id}`;
+    const storageKey = `${prefix}/${index}.png`;
     await this.storage.putBytes(storageKey, png);
     await this.prisma.generatedImage.upsert({
-      where: { batchId_index: { batchId, index } },
-      create: { batchId, index, seed, storageKey },
+      where: { batchId_index: { batchId: batch.id, index } },
+      create: { batchId: batch.id, index, seed, storageKey },
       update: { seed, storageKey },
     });
   }
@@ -492,6 +578,10 @@ function messageOf(data: unknown): string {
     return data.message.trim();
   }
   return "ошибка генерации";
+}
+
+function isUnique(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { code: unknown }).code === "P2002";
 }
 
 function isMissingObject(error: unknown): boolean {

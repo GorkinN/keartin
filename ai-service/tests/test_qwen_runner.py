@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from app.image.qwen_runner import QwenError, QwenRunner, ensure_data_file, gguf_label, resolve_qwen_gguf
+from app.image.qwen_runner import (
+    QwenError,
+    QwenRunner,
+    ensure_data_file,
+    gguf_label,
+    qwen_subprocess_env,
+    resolve_qwen_gguf,
+)
 from app.settings import Settings
 
 
@@ -57,6 +64,22 @@ def test_gguf_choice_is_a_filename(tmp_path) -> None:
         resolve_qwen_gguf(settings, "other.gguf")
     with pytest.raises(QwenError, match="not configured"):
         resolve_qwen_gguf(Settings(qwen_model_path="", qwen_model_paths=""), "other.gguf")
+
+
+def test_qwen_subprocess_env_activates_only_the_qwen_venv(tmp_path, monkeypatch) -> None:
+    python = tmp_path / ".venv-qwen" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"")
+    main_scripts = Path(__file__).resolve().parents[1].parent / "ai-service" / ".venv" / "Scripts"
+    monkeypatch.setenv("VIRTUAL_ENV", r"D:\other\.venv")
+    monkeypatch.setenv("__PYVENV_LAUNCHER__", r"D:\other\.venv\Scripts\python.exe")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(main_scripts), r"C:\Windows"]))
+    env = qwen_subprocess_env(python, Settings(qwen_model_path="", qwen_model_paths=""))
+    assert env["VIRTUAL_ENV"] == str(python.resolve().parent.parent)
+    assert env["QWEN_VENV"] == env["VIRTUAL_ENV"]
+    assert env["__PYVENV_LAUNCHER__"] == str(python.resolve())
+    assert env["PATH"].split(os.pathsep)[0] == str(python.resolve().parent)
+    assert str(main_scripts) not in env["PATH"].split(os.pathsep)
 
 
 def test_paths_must_stay_under_data(tmp_path) -> None:
