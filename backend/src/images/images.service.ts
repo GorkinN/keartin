@@ -133,7 +133,6 @@ export class ImagesService {
     const child = spawn("explorer.exe", [dir], {
       detached: true,
       stdio: "ignore",
-      windowsHide: true,
     });
     child.unref();
     return { ok: true, path: dir };
