@@ -18,5 +18,5 @@
 
 ## Scope
 
-- Implement the current plan stage only. Do not start the next stage “while we are here”.
-- Stage 0: health + stubs. No generate, no parsers, no Book/Post models, no real UI.
+- The app already generates posts and a separate image studio (Flux and Qwen-Image). Stages 8–11 in `docs/plan` (topics, voice, music, video) are not started.
+- Implement only the stage the user asked for. Do not start the next stage “while we are here”.

@@ -1,6 +1,6 @@
 # Архитектура верхнего уровня
 
-Целевая схема продукта. Факт после этапа 1 — в [docs/ARCHITECTURE.md](../ARCHITECTURE.md): health, стрим Ollama, stub GpuManager; без RAG/Flux.
+Исходный эскиз этапов 0–7. Живое описание кода — [docs/ARCHITECTURE.md](../ARCHITECTURE.md) (сверено 2026-10-04): там же Qwen-Image под тенантом `flux`, OCR и отдельная очередь картинок. На схеме ниже тенант `embed` не используется, эмбеды считаются на CPU.
 
 ## Принцип
 

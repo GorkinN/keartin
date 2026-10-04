@@ -9,4 +9,4 @@ alwaysApply: true
 - FastAPI owns the GPU. All Ollama access goes through GpuManager. Bypassing the lock is a bug. Do not `taskkill` Ollama.
 - Set `HF_HOME` / `HUGGINGFACE_HUB_CACHE` / `TRANSFORMERS_CACHE` from `.env` before importing Hugging Face libraries. Do not hardcode cache paths.
 - Do not put Flux in Docker. Do not add ComfyUI. Python deps live in `ai-service/pyproject.toml` only.
-- Implement the current plan stage only.
+- The app already generates posts and images. Stages 8–11 in `docs/plan` are not started. Implement only the stage the user asked for.

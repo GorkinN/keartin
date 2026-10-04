@@ -1,6 +1,6 @@
 # GPU
 
-Факт после этапа 7 (2026-09-24, ждёт приёмки). Владелец GPU — процесс FastAPI. Один `GpuManager`, один `asyncio.Lock`. Тенанты: `llm` | `flux` | `ocr`. Не `taskkill` Ollama. Flux не в Docker и не через ComfyUI.
+Факт по коду на 2026-10-04. Владелец GPU — процесс FastAPI. Один `GpuManager`, один `asyncio.Lock`. Тенанты: `llm` | `flux` | `ocr`. Qwen-Image-2.1 считается отдельным процессом под тенантом `flux`. Не `taskkill` Ollama. Flux и Qwen не в Docker и не через ComfyUI.
 
 ## OCR
 
