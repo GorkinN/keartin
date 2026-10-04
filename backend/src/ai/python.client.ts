@@ -112,6 +112,18 @@ export class PythonClient {
     });
   }
 
+  async rankTopics(body: {
+    area: string;
+    headlines: string[];
+    outline_items: string[];
+  }): Promise<{ topics: { title: string; reason: string }[] }> {
+    return this.json("/topics/rank", {
+      method: "POST",
+      body,
+      timeoutMs: 30 * 60 * 1000,
+    });
+  }
+
   async outlineBook(bookId: string): Promise<{ items: string[]; error: string | null }> {
     return this.json<{ items: string[]; error: string | null }>(
       `/rag/books/${encodeURIComponent(bookId)}/outline`,

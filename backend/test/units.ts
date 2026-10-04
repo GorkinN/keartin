@@ -3,6 +3,7 @@ import { consumeSse, flushSse } from "../src/ai/sse";
 import { batchSeed, parseGenerateInput } from "../src/generate/input";
 import { parseImageBatchInput } from "../src/images/input";
 import { localDateStamp, nextStoragePrefix, slugifyTopic } from "../src/posts/slug";
+import { NewsRssError, fetchNewsHeadlines, newsRssUrl, parseNewsTitles } from "../src/topics/news-rss";
 import { assertStorageKey, assertStoragePrefix } from "../src/storage/keys";
 
 assert.equal(batchSeed(null, 0, 3), null);
@@ -74,7 +75,37 @@ const crlf = consumeSse('event: error\r\ndata: {"message":"недостаточ�
 assert.equal(crlf.events.length, 1);
 assert.deepEqual(crlf.events[0].data, { message: "недостаточно контекста" });
 
+const rss = `<?xml version="1.0"?><rss><channel>
+<item><title>Цена &amp; &lt;b&gt;спрос&lt;/b&gt;</title></item>
+<item><title><![CDATA[Римские дороги]]></title></item>
+<item><title>Цена &amp; &lt;b&gt;спрос&lt;/b&gt;</title></item>
+<item><title>   </title></item>
+</channel></rss>`;
+assert.deepEqual(parseNewsTitles(rss), ["Цена & спрос", "Римские дороги"]);
+assert.deepEqual(parseNewsTitles(`<?xml version="1.0"?><rss><channel><title>лента</title></channel></rss>`), []);
+assert.throws(() => parseNewsTitles("<html><title>нет</title></html>"), NewsRssError);
+const many = Array.from({ length: 30 }, (_, index) => `<item><title>t${index}</title></item>`).join("");
+assert.equal(parseNewsTitles(`<rss><channel>${many}</channel></rss>`).length, 24);
+assert.equal(parseNewsTitles(`<rss><channel><item><title>${"я".repeat(250)}</title></item></channel></rss>`)[0].length, 200);
+assert.equal(
+  newsRssUrl("привычки"),
+  "https://news.google.com/rss/search?q=%D0%BF%D1%80%D0%B8%D0%B2%D1%8B%D1%87%D0%BA%D0%B8&hl=ru&gl=RU&ceid=RU%3Aru",
+);
+
+async function checkRss(): Promise<void> {
+  const empty = `<?xml version="1.0"?><rss><channel></channel></rss>`;
+  await assert.rejects(
+    () => fetchNewsHeadlines("привычки", async () => new Response(empty, { status: 200 })),
+    (error: unknown) => error instanceof NewsRssError && error.kind === "empty",
+  );
+  await assert.rejects(
+    () => fetchNewsHeadlines("привычки", async () => new Response("down", { status: 503 })),
+    (error: unknown) => error instanceof NewsRssError && error.kind === "fetch",
+  );
+}
+
 checkPrefixes()
+  .then(() => checkRss())
   .then(() => {
     console.log("units ok");
   })

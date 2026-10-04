@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, errorMessage } from "@/api/client";
 import { gpuBusyLabel, parseSeed } from "@/api/seed";
@@ -37,6 +38,9 @@ const lengths: PostLength[] = ["S", "M", "L"];
 const modes: KnowledgeMode[] = ["rag", "rag_plus", "general"];
 
 export function CreatePage() {
+  const [searchParams] = useSearchParams();
+  const topicQuery = searchParams.get("topic");
+  const appliedTopic = useRef<string | null>(null);
   const [step, setStep] = useState("sources");
   const [bookIds, setBookIds] = useState<string[]>([]);
   const [sourceQuery, setSourceQuery] = useState("");
@@ -70,6 +74,14 @@ export function CreatePage() {
   const resolvedRef = useRef(new Set<string>());
   const generation = useGeneration(setPost);
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    const next = topicQuery?.trim() ?? "";
+    if (!next || appliedTopic.current === topicQuery) return;
+    appliedTopic.current = topicQuery;
+    setTopic(next);
+    setStep("params");
+  }, [topicQuery]);
 
   const books = useQuery({
     queryKey: ["books"],

@@ -161,3 +161,16 @@ export type ImageQueue = {
   cooldownUntil: string | null;
   items: ImageQueueItem[];
 };
+
+export type TopicItem = {
+  title: string;
+  reason: string;
+};
+
+export type TopicSearch = {
+  id: string;
+  area: string;
+  bookIds: string[];
+  topics: TopicItem[];
+  createdAt: string;
+};

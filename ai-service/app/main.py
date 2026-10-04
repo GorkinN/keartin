@@ -8,6 +8,7 @@ from app.api.gpu import router as gpu_router
 from app.api.health import router as health_router
 from app.api.pipeline import router as pipeline_router
 from app.api.rag import router as rag_router
+from app.api.topics import router as topics_router
 from app.gpu.manager import GpuManager
 from app.image.flux_pipeline import FluxPipelineHolder
 from app.image.runtime import ImageRuntime
@@ -20,6 +21,7 @@ from app.rag.jobs import JobStore
 from app.rag.outline import OutlineWriter
 from app.rag.qdrant_store import QdrantStore
 from app.rag.retriever import Retriever
+from app.topics.rank import TopicRanker
 from app.settings import get_settings
 
 configure_logging()
@@ -33,7 +35,9 @@ gpu.attach_ocr(ocr)
 embedder = Embedder(settings)
 qdrant = QdrantStore(settings)
 rag_jobs = JobStore()
-outline = OutlineWriter(gpu, OllamaClient(settings))
+ollama = OllamaClient(settings)
+outline = OutlineWriter(gpu, ollama)
+topics = TopicRanker(gpu, ollama)
 indexer = Indexer(settings, embedder, qdrant, rag_jobs, ocr=ScanOcr(settings, gpu, ocr), outline=outline)
 retriever = Retriever(settings, embedder, qdrant)
 
@@ -46,6 +50,7 @@ app.state.qdrant = qdrant
 app.state.rag_jobs = rag_jobs
 app.state.indexer = indexer
 app.state.outline = outline
+app.state.topics = topics
 app.state.retriever = retriever
 app.state.cancels = CancelRegistry()
 app.state.rag_tasks = set()
@@ -55,3 +60,4 @@ app.include_router(gpu_router)
 app.include_router(generate_router)
 app.include_router(rag_router)
 app.include_router(pipeline_router)
+app.include_router(topics_router)

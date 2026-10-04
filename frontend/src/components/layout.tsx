@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 
 const links = [
   { to: "/", label: "Библиотека" },
+  { to: "/topics", label: "Темы" },
   { to: "/create", label: "Создать" },
   { to: "/images", label: "Картинки" },
   { to: "/history", label: "История" },

@@ -151,3 +151,11 @@ model ImageJob {
 
   @@index([status, createdAt])
 }
+
+model TopicSearch {
+  id        String   @id @default(cuid())
+  area      String   @default("")
+  bookIds   String   @default("[]")
+  topics    String
+  createdAt DateTime @default(now())
+}

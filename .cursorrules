@@ -18,5 +18,5 @@
 
 ## Scope
 
-- The app already generates posts and a separate image studio (Flux and Qwen-Image). Stages 8–11 in `docs/plan` (topics, voice, music, video) are not started.
+- The app already generates posts, images, and topic suggestions. Stages 9–11 in `docs/plan` (voice, music, video) are not started.
 - Implement only the stage the user asked for. Do not start the next stage “while we are here”.

@@ -8,6 +8,7 @@ import { ImageHistoryDetailRoute } from "@/pages/history-images";
 import { ImagesPage } from "@/pages/images";
 import { LibraryPage } from "@/pages/library";
 import { PresetsPage } from "@/pages/presets";
+import { TopicsPage } from "@/pages/topics";
 
 export function App() {
   return (
@@ -16,6 +17,7 @@ export function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<LibraryPage />} />
+            <Route path="/topics" element={<TopicsPage />} />
             <Route path="/create" element={<CreatePage />} />
             <Route path="/images" element={<ImagesPage />} />
             <Route path="/history" element={<HistoryPage />} />

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -27,10 +28,17 @@ export function BookOutline({ items, className }: { items: string[]; className?:
           open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
         )}
       >
-        <div className="overflow-hidden" aria-hidden={!open}>
+        <div className="overflow-hidden" aria-hidden={!open} inert={open ? undefined : true}>
           <ol className="list-decimal space-y-1 pl-5 pt-2 text-sm">
             {items.map((item, index) => (
-              <li key={`${index}-${item}`}>{item}</li>
+              <li key={`${index}-${item}`}>
+                <Link
+                  to={`/create?topic=${encodeURIComponent(item)}`}
+                  className="rounded-sm hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {item}
+                </Link>
+              </li>
             ))}
           </ol>
         </div>

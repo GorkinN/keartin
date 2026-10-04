@@ -40,6 +40,7 @@ export default defineConfig({
       "/gpu": nestProxy,
       "/health": nestProxy,
       "/config": imagesProxy,
+      "/topics": imagesProxy,
     },
   },
 });

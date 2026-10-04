@@ -8,6 +8,7 @@ import { LibraryModule } from "./library/library.module";
 import { PostsModule } from "./posts/posts.module";
 import { PresetsModule } from "./presets/presets.module";
 import { TonePresetsModule } from "./tone-presets/tone-presets.module";
+import { TopicsModule } from "./topics/topics.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { RecoveryService } from "./recovery.service";
 import { StorageModule } from "./storage/storage.module";
@@ -23,6 +24,7 @@ import { StorageModule } from "./storage/storage.module";
     PresetsModule,
     ImagePresetsModule,
     TonePresetsModule,
+    TopicsModule,
     GenerateModule,
     PostsModule,
   ],
